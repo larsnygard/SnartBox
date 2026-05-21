@@ -36,7 +36,7 @@ export interface SketchControls {
   scaleX: number
   scaleY: number
   useInnerDimensions: boolean
-  hingeWidth: number
+  boxHeight: number
   boxOpacity: number
   boxColor: string
   cornerMode: CornerMode
@@ -49,10 +49,32 @@ export const DEFAULT_SKETCH_CONTROLS: SketchControls = {
   scaleX: 40,
   scaleY: 40,
   useInnerDimensions: false,
-  hingeWidth: 40,
+  boxHeight: 40,
   boxOpacity: 0.55,
   boxColor: '#5f87b8',
   cornerMode: 'none',
   cornerRadius: 5,
   circleCenterOffset: 0,
+}
+
+export type LidType = 'none' | 'simple' | 'snap'
+export type LipStyle = 'none' | 'inner' | 'outer' | 'both'
+
+export interface LidConfig {
+  type: LidType
+  topThickness: number      // mm — thickness of the solid top panel
+  cutDistFromTop: number    // mm — how far from box top the cut sits
+  lipStyle: LipStyle
+  lipWidth: number          // mm — how far the lip protrudes inward / outward
+  lipThickness: number      // mm — height of the lip
+  // hingeEnabled: boolean  // reserved — only valid when hinge line > 10 mm
+}
+
+export const DEFAULT_LID_CONFIG: LidConfig = {
+  type: 'none',
+  topThickness: 2,
+  cutDistFromTop: 3,
+  lipStyle: 'inner',
+  lipWidth: 1.5,
+  lipThickness: 5,
 }

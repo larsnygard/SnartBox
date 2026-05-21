@@ -9,8 +9,10 @@ import path from 'path'
 // - worker format set to 'es' so the geometry Web Worker can use ESM imports
 // - path alias @/ → src/ for clean imports throughout the project
 // - headers: SharedArrayBuffer requires COOP/COEP headers (needed for some WASM threading)
+// - base: './' for relative paths so the app can be deployed to a subfolder
 
 export default defineConfig({
+  base: './',
   plugins: [
     react(),
     wasm(),

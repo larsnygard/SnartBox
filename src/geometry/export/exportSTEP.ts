@@ -87,7 +87,7 @@ function toBounds(controls: SketchControls, zProfile: WallZProfile) {
   const growBy = controls.useInnerDimensions ? zProfile.wallThickness * 2 : 0
   const width = Math.max(1, controls.scaleX + growBy)
   const depth = Math.max(1, controls.scaleY + growBy)
-  const wallHeight = Math.max(20, controls.hingeWidth * 0.9)
+  const wallHeight = Math.max(20, controls.boxHeight)
   const floorThickness = Math.max(0.1, zProfile.bottomThickness)
   const height = Math.max(1, wallHeight + floorThickness)
   return { width, depth, height }
