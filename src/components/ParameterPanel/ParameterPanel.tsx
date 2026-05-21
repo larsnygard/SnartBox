@@ -25,30 +25,20 @@ import type {
   BaseShape,
   CornerMode,
   CustomZProfileShape,
+  LidConfig,
   SketchControls,
   WallZProfile,
   WallZProfileType,
 } from '@/types/sketch'
+import { LidPanel } from './LidPanel'
 
 interface ParameterPanelProps {
   controls: SketchControls
-  onShapeChange: (shape: BaseShape) => void
-  onScaleXChange: (value: number) => void
-  onScaleYChange: (value: number) => void
-  onUseInnerDimensionsChange: (value: boolean) => void
-  onHingeWidthChange: (value: number) => void
-  onBoxOpacityChange: (value: number) => void
-  onBoxColorChange: (value: string) => void
-  onCornerModeChange: (mode: CornerMode) => void
-  onCornerRadiusChange: (value: number) => void
-  onCircleCenterOffsetChange: (value: number) => void
   zProfile: WallZProfile
-  onZProfileTypeChange: (type: WallZProfileType) => void
-  onInsideDraftChange: (value: number) => void
-  onOutsideDraftChange: (value: number) => void
-  onCustomShapeChange: (shape: CustomZProfileShape) => void
-  onWallThicknessChange: (value: number) => void
-  onBottomThicknessChange: (value: number) => void
+  lidConfig: LidConfig
+  onControlsChange: (patch: Partial<SketchControls>) => void
+  onZProfileChange: (patch: Partial<WallZProfile>) => void
+  onLidConfigChange: (patch: Partial<LidConfig>) => void
 }
 
 const SHAPE_OPTIONS: Array<{ value: BaseShape; label: string }> = [
@@ -68,23 +58,11 @@ const CUSTOM_SHAPE_OPTIONS: Array<{ value: CustomZProfileShape; label: string }>
 
 export function ParameterPanel({
   controls,
-  onShapeChange,
-  onScaleXChange,
-  onScaleYChange,
-  onUseInnerDimensionsChange,
-  onHingeWidthChange,
-  onBoxOpacityChange,
-  onBoxColorChange,
-  onCornerModeChange,
-  onCornerRadiusChange,
-  onCircleCenterOffsetChange,
   zProfile,
-  onZProfileTypeChange,
-  onInsideDraftChange,
-  onOutsideDraftChange,
-  onCustomShapeChange,
-  onWallThicknessChange,
-  onBottomThicknessChange,
+  lidConfig,
+  onControlsChange,
+  onZProfileChange,
+  onLidConfigChange,
 }: ParameterPanelProps) {
   const sectionTitleStyle: CSSProperties = {
     color: '#dce6f5',
@@ -146,7 +124,7 @@ export function ParameterPanel({
             return (
               <button
                 key={option.value}
-                onClick={() => onShapeChange(option.value)}
+                onClick={() => onControlsChange({ shape: option.value as BaseShape })}
                 style={{
                   borderRadius: 8,
                   border: isActive ? '2px solid #5f83b1' : '1px solid #2b3747',
@@ -177,7 +155,7 @@ export function ParameterPanel({
             {(['none', 'fillet', 'chamfer'] as CornerMode[]).map((mode) => (
               <button
                 key={mode}
-                onClick={() => onCornerModeChange(mode)}
+                onClick={() => onControlsChange({ cornerMode: mode })}
                 style={profileButtonStyle(controls.cornerMode === mode)}
               >
                 {mode.charAt(0).toUpperCase() + mode.slice(1)}
@@ -198,7 +176,7 @@ export function ParameterPanel({
                 max={20}
                 step={0.5}
                 value={controls.cornerRadius}
-                onChange={(e) => onCornerRadiusChange(Number(e.target.value))}
+                onChange={(e) => onControlsChange({ cornerRadius: Number(e.target.value) })}
               />
             </label>
           )}
@@ -220,7 +198,7 @@ export function ParameterPanel({
               max={300}
               step={0.5}
               value={controls.circleCenterOffset}
-              onChange={(e) => onCircleCenterOffsetChange(Number(e.target.value))}
+              onChange={(e) => onControlsChange({ circleCenterOffset: Number(e.target.value) })}
             />
             <input
               type="number"
@@ -228,7 +206,7 @@ export function ParameterPanel({
               max={300}
               step={0.5}
               value={controls.circleCenterOffset}
-              onChange={(e) => onCircleCenterOffsetChange(Number(e.target.value))}
+              onChange={(e) => onControlsChange({ circleCenterOffset: Number(e.target.value) })}
               style={{
                 padding: '6px 10px',
                 borderRadius: 6,
@@ -259,7 +237,7 @@ export function ParameterPanel({
               max={300}
               step={1}
               value={controls.scaleX}
-              onChange={(e) => onScaleXChange(Number(e.target.value))}
+              onChange={(e) => onControlsChange({ scaleX: Number(e.target.value) })}
             />
           </label>
 
@@ -274,7 +252,7 @@ export function ParameterPanel({
               max={300}
               step={1}
               value={controls.scaleY}
-              onChange={(e) => onScaleYChange(Number(e.target.value))}
+              onChange={(e) => onControlsChange({ scaleY: Number(e.target.value) })}
             />
           </label>
 
@@ -282,7 +260,7 @@ export function ParameterPanel({
             <input
               type="checkbox"
               checked={controls.useInnerDimensions}
-              onChange={(e) => onUseInnerDimensionsChange(e.target.checked)}
+              onChange={(e) => onControlsChange({ useInnerDimensions: e.target.checked })}
             />
             <span>Inner</span>
           </label>
@@ -293,19 +271,19 @@ export function ParameterPanel({
       </section>
 
       <section style={{ width: '100%' }}>
-        <div style={sectionTitleStyle}>Hinge</div>
+        <div style={sectionTitleStyle}>Box Height</div>
         <label style={{ display: 'grid', gap: 6 }}>
           <div style={sliderRowStyle}>
-            <span style={{ color: '#b8c6d8' }}>Hinge Line Width</span>
-            <span style={valueBadgeStyle}>{controls.hingeWidth} mm</span>
+            <span style={{ color: '#b8c6d8' }}>Box Height</span>
+            <span style={valueBadgeStyle}>{controls.boxHeight} mm</span>
           </div>
           <input
             type="range"
             min={10}
             max={120}
             step={1}
-            value={controls.hingeWidth}
-            onChange={(e) => onHingeWidthChange(Number(e.target.value))}
+            value={controls.boxHeight}
+            onChange={(e) => onControlsChange({ boxHeight: Number(e.target.value) })}
           />
         </label>
       </section>
@@ -324,7 +302,7 @@ export function ParameterPanel({
               max={1}
               step={0.01}
               value={controls.boxOpacity}
-              onChange={(e) => onBoxOpacityChange(Number(e.target.value))}
+              onChange={(e) => onControlsChange({ boxOpacity: Number(e.target.value) })}
             />
           </label>
 
@@ -336,7 +314,7 @@ export function ParameterPanel({
             <input
               type="color"
               value={controls.boxColor}
-              onChange={(e) => onBoxColorChange(e.target.value)}
+              onChange={(e) => onControlsChange({ boxColor: e.target.value })}
               style={{ width: '100%', height: 34, border: '1px solid #2b3747', borderRadius: 6, background: '#151d27' }}
             />
           </label>
@@ -347,13 +325,13 @@ export function ParameterPanel({
         <div style={sectionTitleStyle}>Wall Z Profile</div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
           <button
-            onClick={() => onZProfileTypeChange('straight')}
+            onClick={() => onZProfileChange({ type: 'straight' as WallZProfileType })}
             style={profileButtonStyle(zProfile.type === 'straight')}
           >
             Straight
           </button>
           <button
-            onClick={() => onZProfileTypeChange('custom')}
+            onClick={() => onZProfileChange({ type: 'custom' as WallZProfileType })}
             style={profileButtonStyle(zProfile.type === 'custom')}
           >
             Custom
@@ -373,7 +351,7 @@ export function ParameterPanel({
                 max={20}
                 step={0.5}
                 value={zProfile.insideDraft}
-                onChange={(e) => onInsideDraftChange(Number(e.target.value))}
+                onChange={(e) => onZProfileChange({ insideDraft: Number(e.target.value) })}
               />
             </label>
 
@@ -388,7 +366,7 @@ export function ParameterPanel({
                 max={20}
                 step={0.5}
                 value={zProfile.outsideDraft}
-                onChange={(e) => onOutsideDraftChange(Number(e.target.value))}
+                onChange={(e) => onZProfileChange({ outsideDraft: Number(e.target.value) })}
               />
             </label>
           </div>
@@ -404,7 +382,7 @@ export function ParameterPanel({
             </div>
             <select
               value={zProfile.customShape}
-              onChange={(e) => onCustomShapeChange(e.target.value as CustomZProfileShape)}
+              onChange={(e) => onZProfileChange({ customShape: e.target.value as CustomZProfileShape })}
               style={{
                 padding: '6px 10px',
                 borderRadius: 6,
@@ -434,7 +412,7 @@ export function ParameterPanel({
             max={10}
             step={0.01}
             value={zProfile.wallThickness}
-            onChange={(e) => onWallThicknessChange(Number(e.target.value))}
+            onChange={(e) => onZProfileChange({ wallThickness: Number(e.target.value) })}
           />
         </label>
 
@@ -449,10 +427,12 @@ export function ParameterPanel({
             max={10}
             step={0.01}
             value={zProfile.bottomThickness}
-            onChange={(e) => onBottomThicknessChange(Number(e.target.value))}
+            onChange={(e) => onZProfileChange({ bottomThickness: Number(e.target.value) })}
           />
         </label>
       </section>
+
+      <LidPanel lid={lidConfig} onChange={onLidConfigChange} />
     </aside>
   )
 }
