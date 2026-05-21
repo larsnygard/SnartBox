@@ -1,0 +1,11 @@
+node_modules/
+dist/
+
+*.log
+build_output.txt
+build_result.txt
+exit_code.txt
+
+.vscode/
+.DS_Store
+Thumbs.db

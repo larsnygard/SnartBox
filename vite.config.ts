@@ -1,0 +1,38 @@
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import topLevelAwait from 'vite-plugin-top-level-await'
+import wasm from 'vite-plugin-wasm'
+import path from 'path'
+
+// Vite config for SnartBox
+// - topLevelAwait plugin: needed because opencascade.js uses top-level await internally
+// - worker format set to 'es' so the geometry Web Worker can use ESM imports
+// - path alias @/ → src/ for clean imports throughout the project
+// - headers: SharedArrayBuffer requires COOP/COEP headers (needed for some WASM threading)
+
+export default defineConfig({
+  plugins: [
+    react(),
+    wasm(),
+    topLevelAwait(),
+  ],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
+  worker: {
+    format: 'es',
+    plugins: () => [wasm(), topLevelAwait()],
+  },
+  server: {
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+    },
+  },
+  optimizeDeps: {
+    // Exclude opencascade.js from dep pre-bundling — it self-manages its WASM
+    exclude: ['opencascade.js'],
+  },
+})
