@@ -1,4 +1,4 @@
-import type { SketchControls, CornerMode } from '@/types/sketch'
+import type { SketchControls, CornerMode, PathWaveShape } from '@/types/sketch'
 import type { Point2 } from './types'
 
 export function getEffectiveBaseDimensions(controls: SketchControls, wallThickness = 0) {
@@ -148,6 +148,77 @@ export function applyCornerModifier(pts: Point2[], mode: CornerMode, radius: num
   return result
 }
 
+function getWaveValue(shape: PathWaveShape, phase: number): number {
+  if (shape === 'sine') {
+    return Math.sin(phase)
+  }
+
+  if (shape === 'square') {
+    const sine = Math.sin(phase)
+    return Math.abs(sine) < 1e-9 ? 0 : Math.sign(sine)
+  }
+
+  return (2 / Math.PI) * Math.asin(Math.sin(phase))
+}
+
+export function applyPathWaveModifier(
+  pts: Point2[],
+  shape: PathWaveShape,
+  amplitude: number,
+  frequency: number,
+): Point2[] {
+  if (pts.length < 2 || amplitude <= 0 || frequency <= 0) {
+    return pts
+  }
+
+  const cycles = Math.max(1, Math.round(frequency))
+  const perimeter = pts.reduce((total, point, index) => {
+    const next = pts[(index + 1) % pts.length]
+    return total + Math.hypot(next[0] - point[0], next[1] - point[1])
+  }, 0)
+
+  if (perimeter < 1e-9) {
+    return pts
+  }
+
+  const samplesPerCycle = 32
+  const targetStep = perimeter / (cycles * samplesPerCycle)
+  const orientation = polygonSignedArea(pts) >= 0 ? 1 : -1
+  const wavePts: Point2[] = []
+
+  let distanceAlong = 0
+  for (let i = 0; i < pts.length; i += 1) {
+    const start = pts[i]
+    const end = pts[(i + 1) % pts.length]
+    const dx = end[0] - start[0]
+    const dy = end[1] - start[1]
+    const segmentLength = Math.hypot(dx, dy)
+    if (segmentLength < 1e-9) {
+      continue
+    }
+
+    const stepCount = Math.max(1, Math.ceil(segmentLength / targetStep))
+    const normalX = orientation > 0 ? dy / segmentLength : -dy / segmentLength
+    const normalY = orientation > 0 ? -dx / segmentLength : dx / segmentLength
+
+    for (let step = 0; step < stepCount; step += 1) {
+      const t = step / stepCount
+      const phase = ((distanceAlong + t * segmentLength) / perimeter) * cycles * 2 * Math.PI
+      const waveValue = getWaveValue(shape, phase)
+      const baseX = start[0] + dx * t
+      const baseY = start[1] + dy * t
+      wavePts.push([
+        baseX + normalX * amplitude * waveValue,
+        baseY + normalY * amplitude * waveValue,
+      ])
+    }
+
+    distanceAlong += segmentLength
+  }
+
+  return wavePts.length >= 3 ? wavePts : pts
+}
+
 export function buildBaseShapePoints(controls: SketchControls, wallThickness = 0): Point2[] {
   const { outerX, outerY } = getEffectiveBaseDimensions(controls, wallThickness)
 
@@ -176,7 +247,13 @@ export function buildBaseShapePoints(controls: SketchControls, wallThickness = 0
       ])
     }
 
-    return centerPathOnHingeMidpoint(circlePoints)
+    const centered = centerPathOnHingeMidpoint(circlePoints)
+    return applyPathWaveModifier(
+      centered,
+      controls.pathWaveShape,
+      controls.pathWaveAmplitude,
+      controls.pathWaveFrequency,
+    )
   }
 
   let raw: Point2[]
@@ -208,6 +285,8 @@ export function buildBaseShapePoints(controls: SketchControls, wallThickness = 0
   if (controls.cornerMode !== 'none' && controls.cornerRadius > 0) {
     pts = applyCornerModifier(pts, controls.cornerMode, controls.cornerRadius)
   }
+
+  pts = applyPathWaveModifier(pts, controls.pathWaveShape, controls.pathWaveAmplitude, controls.pathWaveFrequency)
 
   return pts
 }

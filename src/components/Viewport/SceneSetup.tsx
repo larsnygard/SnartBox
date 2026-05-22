@@ -67,7 +67,12 @@ function AxisScaleLabels() {
   )
 }
 
-export function SceneSetup() {
+interface SceneSetupProps {
+  showGrid: boolean
+  showAxes: boolean
+}
+
+export function SceneSetup({ showGrid, showAxes }: SceneSetupProps) {
   return (
     <>
       <OrbitControls enableDamping dampingFactor={0.05} minDistance={10} maxDistance={1000} />
@@ -76,13 +81,19 @@ export function SceneSetup() {
       <directionalLight position={[100, 200, 150]} intensity={0.8} />
       <directionalLight position={[-100, 50, -100]} intensity={0.3} />
 
-      <gridHelper args={[500, 50, '#333355', '#222233']} />
-      <axesHelper args={[30]} />
-      <AxisScaleLabels />
+      {showGrid && <gridHelper args={[500, 50, '#333355', '#222233']} />}
+      {showAxes && (
+        <>
+          <axesHelper args={[30]} />
+          <AxisScaleLabels />
+        </>
+      )}
 
-      <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
-        <GizmoViewcube />
-      </GizmoHelper>
+      {showAxes && (
+        <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
+          <GizmoViewcube />
+        </GizmoHelper>
+      )}
     </>
   )
 }

@@ -112,11 +112,6 @@ function addLidShell(
       outerGrid[i][sampleCount - 1], outerGrid[ni][sampleCount - 1],
       innerGrid[ni][sampleCount - 1], innerGrid[i][sampleCount - 1],
     )
-    // Bottom bridge at cutHeight
-    addQuad(
-      positions,
-      outerGrid[i][0], innerGrid[i][0], innerGrid[ni][0], outerGrid[ni][0],
-    )
   }
 }
 

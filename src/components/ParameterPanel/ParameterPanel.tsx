@@ -26,7 +26,9 @@ import type {
   CornerMode,
   CustomZProfileShape,
   LidConfig,
+  PathWaveShape,
   SketchControls,
+  WallProfileAnchor,
   WallZProfile,
   WallZProfileType,
 } from '@/types/sketch'
@@ -50,10 +52,22 @@ const SHAPE_OPTIONS: Array<{ value: BaseShape; label: string }> = [
   { value: 'customPolygon', label: 'Custom Polygon' },
 ]
 
+const PATH_WAVE_OPTIONS: Array<{ value: PathWaveShape; label: string }> = [
+  { value: 'sine', label: 'Sine' },
+  { value: 'square', label: 'Square' },
+  { value: 'triangle', label: 'Triangle' },
+]
+
 const CUSTOM_SHAPE_OPTIONS: Array<{ value: CustomZProfileShape; label: string }> = [
   { value: 'sine', label: 'Sine' },
   { value: 'square', label: 'Square' },
   { value: 'customDrawn', label: 'Custom (Drawn)' },
+]
+
+const PROFILE_ANCHOR_OPTIONS: Array<{ value: WallProfileAnchor; label: string }> = [
+  { value: 'outer', label: 'Outer' },
+  { value: 'middle', label: 'Middle' },
+  { value: 'inner', label: 'Inner' },
 ]
 
 export function ParameterPanel({
@@ -147,6 +161,60 @@ export function ParameterPanel({
           })}
         </div>
       </section>
+
+      <section style={{ width: '100%' }}>
+        <div style={sectionTitleStyle}>Path Wave Modifier</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+          {PATH_WAVE_OPTIONS.map((option) => {
+            const isActive = controls.pathWaveShape === option.value
+            return (
+              <button
+                key={option.value}
+                onClick={() => onControlsChange({ pathWaveShape: option.value })}
+                style={profileButtonStyle(isActive)}
+              >
+                {option.label}
+              </button>
+            )
+          })}
+        </div>
+
+        <div style={{ display: 'grid', gap: 14 }}>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <div style={sliderRowStyle}>
+              <span style={{ color: '#b8c6d8' }}>Amplitude</span>
+              <span style={valueBadgeStyle}>{controls.pathWaveAmplitude.toFixed(1)} mm</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={20}
+              step={0.1}
+              value={controls.pathWaveAmplitude}
+              onChange={(e) => onControlsChange({ pathWaveAmplitude: Number(e.target.value) })}
+            />
+          </label>
+
+          <label style={{ display: 'grid', gap: 6 }}>
+            <div style={sliderRowStyle}>
+              <span style={{ color: '#b8c6d8' }}>Frequency</span>
+              <span style={valueBadgeStyle}>{controls.pathWaveFrequency.toFixed(0)} cycles</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={32}
+              step={1}
+              value={controls.pathWaveFrequency}
+              onChange={(e) => onControlsChange({ pathWaveFrequency: Number(e.target.value) })}
+            />
+            <div style={{ fontSize: 11, color: '#637080' }}>
+              Whole cycles keep the seam in phase and avoid artifacts.
+            </div>
+          </label>
+        </div>
+      </section>
+
       {/* Shape Modifiers — polygon corners */}
       {['square', 'triangle', 'pentagon', 'hexagon', 'customPolygon'].includes(controls.shape) && (
         <section style={{ width: '100%' }}>
@@ -223,6 +291,7 @@ export function ParameterPanel({
           </label>
         </section>
       )}
+
       <section style={{ width: '100%' }}>
         <div style={sectionTitleStyle}>Shape Dimensions</div>
         <div style={{ display: 'grid', gap: 14 }}>
@@ -280,7 +349,7 @@ export function ParameterPanel({
           <input
             type="range"
             min={10}
-            max={120}
+            max={300}
             step={1}
             value={controls.boxHeight}
             onChange={(e) => onControlsChange({ boxHeight: Number(e.target.value) })}
@@ -338,67 +407,127 @@ export function ParameterPanel({
           </button>
         </div>
 
-        {zProfile.type === 'straight' && (
-          <div style={{ display: 'grid', gap: 10 }}>
+        <div style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
+          <div style={sliderRowStyle}>
+            <span style={{ color: '#b8c6d8' }}>Sweep Anchor</span>
+            <span style={valueBadgeStyle}>
+              {PROFILE_ANCHOR_OPTIONS.find((option) => option.value === zProfile.profileAnchor)?.label}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {PROFILE_ANCHOR_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                onClick={() => onZProfileChange({ profileAnchor: option.value })}
+                style={profileButtonStyle(zProfile.profileAnchor === option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#b8c6d8', marginBottom: 12 }}>
+          <input
+            type="checkbox"
+            checked={zProfile.straightInnerWall}
+            onChange={(e) => onZProfileChange({ straightInnerWall: e.target.checked })}
+          />
+          <span>Straight Inner Wall</span>
+        </label>
+
+        <div style={{ display: 'grid', gap: 10, marginBottom: 10 }}>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <div style={sliderRowStyle}>
+              <span style={{ color: '#b8c6d8' }}>Inside Draft Angle</span>
+              <span style={valueBadgeStyle}>{zProfile.straightInnerWall ? 0 : zProfile.insideDraft}&deg;</span>
+            </div>
+            <input
+              type="range"
+              min={-45}
+              max={45}
+              step={0.5}
+              value={zProfile.straightInnerWall ? 0 : zProfile.insideDraft}
+              disabled={zProfile.straightInnerWall}
+              onChange={(e) => onZProfileChange({ insideDraft: Number(e.target.value) })}
+            />
+          </label>
+
+          <label style={{ display: 'grid', gap: 6 }}>
+            <div style={sliderRowStyle}>
+              <span style={{ color: '#b8c6d8' }}>Outside Draft Angle</span>
+              <span style={valueBadgeStyle}>{zProfile.outsideDraft}&deg;</span>
+            </div>
+            <input
+              type="range"
+              min={-45}
+              max={45}
+              step={0.5}
+              value={zProfile.outsideDraft}
+              onChange={(e) => onZProfileChange({ outsideDraft: Number(e.target.value) })}
+            />
+          </label>
+        </div>
+
+        {zProfile.type === 'custom' && (
+          <div style={{ display: 'grid', gap: 10, marginBottom: 10 }}>
             <label style={{ display: 'grid', gap: 6 }}>
               <div style={sliderRowStyle}>
-                <span style={{ color: '#b8c6d8' }}>Inside Draft Angle</span>
-                <span style={valueBadgeStyle}>{zProfile.insideDraft}&deg;</span>
+                <span style={{ color: '#b8c6d8' }}>Custom Profile</span>
+                <span style={valueBadgeStyle}>
+                  {CUSTOM_SHAPE_OPTIONS.find((option) => option.value === zProfile.customShape)?.label}
+                </span>
+              </div>
+              <select
+                value={zProfile.customShape}
+                onChange={(e) => onZProfileChange({ customShape: e.target.value as CustomZProfileShape })}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: 6,
+                  background: '#151d27',
+                  color: '#b0bfce',
+                  border: '1px solid #2b3747',
+                  fontSize: 13,
+                }}
+              >
+                {CUSTOM_SHAPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label style={{ display: 'grid', gap: 6 }}>
+              <div style={sliderRowStyle}>
+                <span style={{ color: '#b8c6d8' }}>Profile Amplitude</span>
+                <span style={valueBadgeStyle}>{zProfile.customAmplitude.toFixed(1)} mm</span>
               </div>
               <input
                 type="range"
-                min={-10}
+                min={0}
                 max={20}
-                step={0.5}
-                value={zProfile.insideDraft}
-                onChange={(e) => onZProfileChange({ insideDraft: Number(e.target.value) })}
+                step={0.1}
+                value={zProfile.customAmplitude}
+                onChange={(e) => onZProfileChange({ customAmplitude: Number(e.target.value) })}
               />
             </label>
 
             <label style={{ display: 'grid', gap: 6 }}>
               <div style={sliderRowStyle}>
-                <span style={{ color: '#b8c6d8' }}>Outside Draft Angle</span>
-                <span style={valueBadgeStyle}>{zProfile.outsideDraft}&deg;</span>
+                <span style={{ color: '#b8c6d8' }}>Profile Frequency</span>
+                <span style={valueBadgeStyle}>{zProfile.customFrequency.toFixed(2)} cycles</span>
               </div>
               <input
                 type="range"
-                min={-10}
-                max={20}
-                step={0.5}
-                value={zProfile.outsideDraft}
-                onChange={(e) => onZProfileChange({ outsideDraft: Number(e.target.value) })}
+                min={0.25}
+                max={10}
+                step={0.25}
+                value={zProfile.customFrequency}
+                onChange={(e) => onZProfileChange({ customFrequency: Number(e.target.value) })}
               />
             </label>
           </div>
-        )}
-
-        {zProfile.type === 'custom' && (
-          <label style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
-            <div style={sliderRowStyle}>
-              <span style={{ color: '#b8c6d8' }}>Custom Profile</span>
-              <span style={valueBadgeStyle}>
-                {CUSTOM_SHAPE_OPTIONS.find((option) => option.value === zProfile.customShape)?.label}
-              </span>
-            </div>
-            <select
-              value={zProfile.customShape}
-              onChange={(e) => onZProfileChange({ customShape: e.target.value as CustomZProfileShape })}
-              style={{
-                padding: '6px 10px',
-                borderRadius: 6,
-                background: '#151d27',
-                color: '#b0bfce',
-                border: '1px solid #2b3747',
-                fontSize: 13,
-              }}
-            >
-              {CUSTOM_SHAPE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
         )}
 
         <label style={{ display: 'grid', gap: 6 }}>

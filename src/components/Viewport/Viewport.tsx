@@ -29,6 +29,8 @@ interface ViewportProps {
   lidConfig: LidConfig
 }
 
+type RenderStyle = 'shaded' | 'wireframe'
+
 function BasePathPreview({ controls, zProfile }: { controls: SketchControls; zProfile: WallZProfile }) {
   const { pathPoints, hingeLine3D } = useMemo(() => {
     const path = buildBaseShapePoints(controls, zProfile.wallThickness)
@@ -95,7 +97,17 @@ function downloadBlob(blob: Blob, fileName: string) {
   window.URL.revokeObjectURL(url)
 }
 
-function WallSweepPreview({ controls, zProfile, cutHeight }: { controls: SketchControls; zProfile: WallZProfile; cutHeight?: number }) {
+function WallSweepPreview({
+  controls,
+  zProfile,
+  cutHeight,
+  renderStyle,
+}: {
+  controls: SketchControls
+  zProfile: WallZProfile
+  cutHeight?: number
+  renderStyle: RenderStyle
+}) {
   const geometry = useMemo(() => {
     return buildWallSweepGeometry(controls, zProfile, cutHeight)
   }, [controls, zProfile, cutHeight])
@@ -110,6 +122,7 @@ function WallSweepPreview({ controls, zProfile, cutHeight }: { controls: SketchC
         transparent={controls.boxOpacity < 0.999}
         metalness={0.05}
         roughness={0.7}
+        wireframe={renderStyle === 'wireframe'}
         side={DoubleSide}
       />
     </mesh>
@@ -121,11 +134,13 @@ function LidPreview({
   zProfile,
   lidConfig,
   cutHeight,
+  renderStyle,
 }: {
   controls: SketchControls
   zProfile: WallZProfile
   lidConfig: LidConfig
   cutHeight: number
+  renderStyle: RenderStyle
 }) {
   const geometry = useMemo(
     () => buildLidGeometry(controls, zProfile, lidConfig),
@@ -134,9 +149,8 @@ function LidPreview({
 
   if (!geometry) return null
 
-  // Lift lid 4 mm above the cut line so it reads as visually separated
   return (
-    <group position={[0, cutHeight + 4, 0]}>
+    <group position={[0, cutHeight, 0]}>
       <mesh geometry={geometry} position={[0, -cutHeight, 0]}>
         <meshStandardMaterial
           color={controls.boxColor}
@@ -144,6 +158,7 @@ function LidPreview({
           transparent={controls.boxOpacity < 0.999}
           metalness={0.05}
           roughness={0.7}
+          wireframe={renderStyle === 'wireframe'}
           side={DoubleSide}
         />
       </mesh>
@@ -162,6 +177,9 @@ export function Viewport({ controls, zProfile, lidConfig }: ViewportProps) {
   const [cadStatus, setCadStatus] = useState('')
   const [showBox, setShowBox] = useState(true)
   const [showLid, setShowLid] = useState(true)
+  const [renderStyle, setRenderStyle] = useState<RenderStyle>('shaded')
+  const [showGrid, setShowGrid] = useState(true)
+  const [showAxes, setShowAxes] = useState(true)
 
   useEffect(() => {
     if (renderMode !== 'cad') return
@@ -319,6 +337,74 @@ export function Viewport({ controls, zProfile, lidConfig }: ViewportProps) {
         </div>
 
         <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
+          <div style={{ fontSize: 11, color: '#8ea0b8' }}>Render</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={() => setRenderStyle('shaded')}
+              style={{
+                flex: 1,
+                borderRadius: 6,
+                border: renderStyle === 'shaded' ? '2px solid #5f83b1' : '1px solid #2b3747',
+                background: renderStyle === 'shaded' ? '#243447' : '#151d27',
+                color: renderStyle === 'shaded' ? '#edf4ff' : '#b0bfce',
+                padding: '6px 8px',
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+            >
+              Shaded Basic
+            </button>
+            <button
+              onClick={() => setRenderStyle('wireframe')}
+              style={{
+                flex: 1,
+                borderRadius: 6,
+                border: renderStyle === 'wireframe' ? '2px solid #5f83b1' : '1px solid #2b3747',
+                background: renderStyle === 'wireframe' ? '#243447' : '#151d27',
+                color: renderStyle === 'wireframe' ? '#edf4ff' : '#b0bfce',
+                padding: '6px 8px',
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+            >
+              Wireframe
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={() => setShowGrid((v) => !v)}
+              style={{
+                flex: 1,
+                borderRadius: 6,
+                border: showGrid ? '2px solid #5f83b1' : '1px solid #2b3747',
+                background: showGrid ? '#243447' : '#151d27',
+                color: showGrid ? '#edf4ff' : '#b0bfce',
+                padding: '6px 8px',
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+            >
+              Grid
+            </button>
+            <button
+              onClick={() => setShowAxes((v) => !v)}
+              style={{
+                flex: 1,
+                borderRadius: 6,
+                border: showAxes ? '2px solid #5f83b1' : '1px solid #2b3747',
+                background: showAxes ? '#243447' : '#151d27',
+                color: showAxes ? '#edf4ff' : '#b0bfce',
+                padding: '6px 8px',
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+            >
+              Axis
+            </button>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
           <div style={{ fontSize: 11, color: '#8ea0b8' }}>Visibility</div>
           <div style={{ display: 'flex', gap: 6 }}>
             <button
@@ -403,10 +489,23 @@ export function Viewport({ controls, zProfile, lidConfig }: ViewportProps) {
         }}
         style={{ background: '#1b232d' }}
       >
-        <SceneSetup />
-        {showBox && <WallSweepPreview controls={activeControls} zProfile={activeZProfile} cutHeight={activeCutHeight} />}
+        <SceneSetup showGrid={showGrid} showAxes={showAxes} />
+        {showBox && (
+          <WallSweepPreview
+            controls={activeControls}
+            zProfile={activeZProfile}
+            cutHeight={activeCutHeight}
+            renderStyle={renderStyle}
+          />
+        )}
         {showLid && activeCutHeight !== undefined && (
-          <LidPreview controls={activeControls} zProfile={activeZProfile} lidConfig={activeLidConfig} cutHeight={activeCutHeight} />
+          <LidPreview
+            controls={activeControls}
+            zProfile={activeZProfile}
+            lidConfig={activeLidConfig}
+            cutHeight={activeCutHeight}
+            renderStyle={renderStyle}
+          />
         )}
         <BasePathPreview controls={activeControls} zProfile={activeZProfile} />
         <ZProfileGuide controls={activeControls} zProfile={activeZProfile} />
