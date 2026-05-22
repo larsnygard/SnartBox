@@ -15,7 +15,7 @@ import { Line } from '@react-three/drei'
 import { useEffect, useMemo, useState } from 'react'
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js'
 import { Mesh, DoubleSide } from 'three'
-import { exportStepBlob } from '@/geometry/export/exportSTEP'
+import { exportStepBlob, rebuildOpenCascadeStepCache } from '@/geometry/export/exportSTEP'
 import type { LidConfig, SketchControls, WallZProfile } from '@/types/sketch'
 import { buildBaseShapePoints, getEffectiveBaseDimensions } from '@/geometry/baseShape'
 import { buildZProfilePoints } from '@/geometry/zProfile'
@@ -159,21 +159,45 @@ export function Viewport({ controls, zProfile, lidConfig }: ViewportProps) {
   const [cadZProfile, setCadZProfile] = useState(zProfile)
   const [cadLidConfig, setCadLidConfig] = useState(lidConfig)
   const [isCadUpdating, setIsCadUpdating] = useState(false)
+  const [cadStatus, setCadStatus] = useState('')
   const [showBox, setShowBox] = useState(true)
   const [showLid, setShowLid] = useState(true)
 
   useEffect(() => {
     if (renderMode !== 'cad') return
 
+    let cancelled = false
     setIsCadUpdating(true)
+    setCadStatus('Queued OpenCascade rebuild...')
+
     const timer = window.setTimeout(() => {
       setCadControls(controls)
       setCadZProfile(zProfile)
       setCadLidConfig(lidConfig)
-      setIsCadUpdating(false)
+
+      void rebuildOpenCascadeStepCache(controls, zProfile)
+        .then((result) => {
+          if (cancelled) return
+          if (result.errorMessage) {
+            console.warn('OpenCascade rebuild failed, using fallback STEP cache:', result.errorMessage)
+          }
+          setCadStatus(
+            result.fromOpenCascade
+              ? 'OpenCascade rebuild complete.'
+              : 'OpenCascade unavailable, using fallback STEP cache.',
+          )
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setIsCadUpdating(false)
+          }
+        })
     }, 300)
 
-    return () => window.clearTimeout(timer)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
   }, [controls, zProfile, lidConfig, renderMode])
 
   const activeControls = renderMode === 'preview' ? controls : cadControls
@@ -291,7 +315,7 @@ export function Viewport({ controls, zProfile, lidConfig }: ViewportProps) {
             ? 'Fast mesh updates while dragging controls.'
             : isCadUpdating
               ? 'CAD mode updating...'
-              : 'CAD mode ready. Hook OpenCascade rebuild here.'}
+              : cadStatus || 'CAD mode ready.'}
         </div>
 
         <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>

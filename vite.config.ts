@@ -1,7 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import topLevelAwait from 'vite-plugin-top-level-await'
-import wasm from 'vite-plugin-wasm'
 import path from 'path'
 
 // Vite config for SnartBox
@@ -15,7 +14,6 @@ export default defineConfig({
   base: './',
   plugins: [
     react(),
-    wasm(),
     topLevelAwait(),
   ],
   resolve: {
@@ -25,7 +23,7 @@ export default defineConfig({
   },
   worker: {
     format: 'es',
-    plugins: () => [wasm(), topLevelAwait()],
+    plugins: () => [topLevelAwait()],
   },
   server: {
     headers: {

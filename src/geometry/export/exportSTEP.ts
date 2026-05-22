@@ -1,5 +1,5 @@
 import ocMainJS from 'opencascade.js/dist/opencascade.js'
-import ocCoreWasm from 'opencascade.js/dist/opencascade.core.wasm?url'
+import ocMainWasm from 'opencascade.js/dist/opencascade.wasm?url'
 import TKMathWasm from 'opencascade.js/dist/module.TKMath.wasm?url'
 import TKG2dWasm from 'opencascade.js/dist/module.TKG2d.wasm?url'
 import TKG3dWasm from 'opencascade.js/dist/module.TKG3d.wasm?url'
@@ -8,6 +8,10 @@ import TKGeomBaseWasm from 'opencascade.js/dist/module.TKGeomBase.wasm?url'
 import TKBRepWasm from 'opencascade.js/dist/module.TKBRep.wasm?url'
 import TKGeomAlgoWasm from 'opencascade.js/dist/module.TKGeomAlgo.wasm?url'
 import TKTopAlgoWasm from 'opencascade.js/dist/module.TKTopAlgo.wasm?url'
+import TKHLRWasm from 'opencascade.js/dist/module.TKHLR.wasm?url'
+import TKShHealingWasm from 'opencascade.js/dist/module.TKShHealing.wasm?url'
+import TKMeshWasm from 'opencascade.js/dist/module.TKMesh.wasm?url'
+import TKV3dWasm from 'opencascade.js/dist/module.TKV3d.wasm?url'
 import TKPrimWasm from 'opencascade.js/dist/module.TKPrim.wasm?url'
 import TKXSBaseWasm from 'opencascade.js/dist/module.TKXSBase.wasm?url'
 import TKSTEPBaseWasm from 'opencascade.js/dist/module.TKSTEPBase.wasm?url'
@@ -15,6 +19,13 @@ import TKSTEP209Wasm from 'opencascade.js/dist/module.TKSTEP209.wasm?url'
 import TKSTEPAttrWasm from 'opencascade.js/dist/module.TKSTEPAttr.wasm?url'
 import TKSTEPWasm from 'opencascade.js/dist/module.TKSTEP.wasm?url'
 import type { SketchControls, WallZProfile } from '@/types/sketch'
+
+type CadRebuildResult = {
+  ok: boolean
+  fromOpenCascade: boolean
+  fallbackUsed: boolean
+  errorMessage?: string
+}
 
 type OpenCascadeInstance = {
   [key: string]: unknown
@@ -37,6 +48,12 @@ type OpenCascadeInstance = {
 }
 
 let ocPromise: Promise<OpenCascadeInstance> | null = null
+let cachedStepBlob: Blob | null = null
+let cachedStepKey: string | null = null
+
+function buildStepCacheKey(controls: SketchControls, zProfile: WallZProfile): string {
+  return JSON.stringify({ controls, zProfile })
+}
 
 async function getOpenCascade() {
   if (!ocPromise) {
@@ -44,9 +61,8 @@ async function getOpenCascade() {
       new (settings: { locateFile: (path: string) => string }): Promise<OpenCascadeInstance>
     })({
       locateFile(path: string) {
-        // Use dynamic core module as the main runtime for subsequent dylib loading.
         if (path.endsWith('.wasm')) {
-          return ocCoreWasm
+          return ocMainWasm
         }
         return path
       },
@@ -61,6 +77,10 @@ async function getOpenCascade() {
           TKBRepWasm,
           TKGeomAlgoWasm,
           TKTopAlgoWasm,
+          TKHLRWasm,
+          TKShHealingWasm,
+          TKMeshWasm,
+          TKV3dWasm,
           TKPrimWasm,
           TKXSBaseWasm,
           TKSTEPBaseWasm,
@@ -70,12 +90,17 @@ async function getOpenCascade() {
         ]
 
         for (const lib of orderedLibs) {
-          await oc.loadDynamicLibrary(lib, {
-            loadAsync: true,
-            global: true,
-            nodelete: true,
-            allowUndefined: false,
-          })
+          try {
+            await oc.loadDynamicLibrary(lib, {
+              loadAsync: true,
+              global: true,
+              nodelete: true,
+              allowUndefined: false,
+            })
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            throw new Error(`OpenCascade failed loading ${lib}: ${message}`)
+          }
         }
         return oc
       })
@@ -232,49 +257,98 @@ function buildFacetedStepBox(width: number, depth: number, height: number) {
   return lines.join('\n')
 }
 
-export async function exportStepBlob(controls: SketchControls, zProfile: WallZProfile) {
+async function buildStepBlobWithOpenCascade(controls: SketchControls, zProfile: WallZProfile): Promise<Blob> {
   const { width, depth, height } = toBounds(controls, zProfile)
-  try {
-    const oc = await getOpenCascade()
-    const filePath = '/snartbox.step'
-    const boxMaker = constructBoxMaker(oc, width, height, depth)
+  const oc = await getOpenCascade()
+  const filePath = '/snartbox.step'
+  const boxMaker = constructBoxMaker(oc, width, height, depth)
 
-    const shape =
-      typeof boxMaker.Shape === 'function' ? boxMaker.Shape() :
-      typeof boxMaker.Solid === 'function' ? boxMaker.Solid() :
-      null
+  const shape =
+    typeof boxMaker.Shape === 'function' ? boxMaker.Shape() :
+    typeof boxMaker.Solid === 'function' ? boxMaker.Solid() :
+    null
 
-    if (!shape) {
-      throw new Error('Failed to create OpenCascade shape from box maker')
-    }
-
-    const writer = constructWithOverload<{
-      Transfer: (shape: unknown, mode: unknown, compgraph: boolean, progress: unknown) => unknown
-      Write: (filename: string) => unknown
-      delete?: () => void
-    }>(oc, 'STEPControl_Writer', [])
-
-    try {
-      // Message_ProgressRange constructor availability varies by build, so pass null.
-      writer.Transfer(shape, oc.STEPControl_StepModelType.STEPControl_AsIs, true, null as unknown as never)
-      writer.Write(filePath)
-
-      const bytes = oc.FS.readFile(filePath, { encoding: 'binary' }) as Uint8Array
-      const fileData = bytes.slice().buffer
-      return new Blob([fileData], { type: 'model/step' })
-    } finally {
-      try {
-        oc.FS.unlink(filePath)
-      } catch {
-        // Ignore if file does not exist.
-      }
-      writer.delete?.()
-      shape.delete?.()
-      boxMaker.delete?.()
-    }
-  } catch {
-    // Fallback if OpenCascade fails to initialize/link at runtime.
-    const text = buildFacetedStepBox(width, depth, height)
-    return new Blob([text], { type: 'model/step' })
+  if (!shape) {
+    throw new Error('Failed to create OpenCascade shape from box maker')
   }
+
+  const writer = constructWithOverload<{
+    Transfer: (shape: unknown, mode: unknown, compgraph: boolean, progress?: unknown) => unknown
+    Write: (filename: string) => unknown
+    delete?: () => void
+  }>(oc, 'STEPControl_Writer', [])
+  let progressRange: { delete?: () => void } | null = null
+
+  try {
+    const mode = oc.STEPControl_StepModelType.STEPControl_AsIs
+    try {
+      progressRange = constructWithOverload<{ delete?: () => void }>(oc, 'Message_ProgressRange', [])
+      writer.Transfer(shape, mode, true, progressRange)
+    } catch {
+      // Fallback for builds with a different Transfer signature.
+      writer.Transfer(shape, mode, true)
+    }
+    writer.Write(filePath)
+
+    const bytes = oc.FS.readFile(filePath, { encoding: 'binary' }) as Uint8Array
+    const fileData = bytes.slice().buffer
+    return new Blob([fileData], { type: 'model/step' })
+  } finally {
+    try {
+      oc.FS.unlink(filePath)
+    } catch {
+      // Ignore if file does not exist.
+    }
+    writer.delete?.()
+    progressRange?.delete?.()
+    shape.delete?.()
+    boxMaker.delete?.()
+  }
+}
+
+function buildFallbackStepBlob(controls: SketchControls, zProfile: WallZProfile): Blob {
+  const { width, depth, height } = toBounds(controls, zProfile)
+  const text = buildFacetedStepBox(width, depth, height)
+  return new Blob([text], { type: 'model/step' })
+}
+
+export async function rebuildOpenCascadeStepCache(
+  controls: SketchControls,
+  zProfile: WallZProfile,
+): Promise<CadRebuildResult> {
+  const key = buildStepCacheKey(controls, zProfile)
+  try {
+    cachedStepBlob = await buildStepBlobWithOpenCascade(controls, zProfile)
+    cachedStepKey = key
+    return {
+      ok: true,
+      fromOpenCascade: true,
+      fallbackUsed: false,
+    }
+  } catch (error) {
+    cachedStepBlob = buildFallbackStepBlob(controls, zProfile)
+    cachedStepKey = key
+    return {
+      ok: true,
+      fromOpenCascade: false,
+      fallbackUsed: true,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+export async function exportStepBlob(controls: SketchControls, zProfile: WallZProfile) {
+  const key = buildStepCacheKey(controls, zProfile)
+  if (cachedStepBlob && cachedStepKey === key) {
+    return cachedStepBlob
+  }
+
+  const result = await rebuildOpenCascadeStepCache(controls, zProfile)
+  if (cachedStepBlob) return cachedStepBlob
+
+  // Defensive fallback: rebuild should always populate cache.
+  if (!result.ok) {
+    return buildFallbackStepBlob(controls, zProfile)
+  }
+  return buildFallbackStepBlob(controls, zProfile)
 }
