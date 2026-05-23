@@ -287,6 +287,9 @@ export function Viewport({ controls, zProfile, lidConfig, onControlsChange }: Vi
       } else {
         const exporter = new STLExporter()
         const mesh = new Mesh(exportGeometry)
+        // Match STEP orientation: export as Z-up for CAD/slicers.
+        mesh.rotation.x = Math.PI / 2
+        mesh.updateMatrixWorld(true)
         const stlText = exporter.parse(mesh) as string
         downloadBlob(new Blob([stlText], { type: 'model/stl' }), 'snartbox.stl')
       }
