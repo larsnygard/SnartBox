@@ -18,6 +18,7 @@ export function buildZProfilePoints(
   const rawInsideSlope = zProfile.straightInnerWall ? 0 : Math.tan(degreesToRadians(zProfile.insideDraft))
   const customAmplitude = Math.max(0, zProfile.customAmplitude)
   const customFrequency = Math.max(0.01, zProfile.customFrequency)
+  const customPhaseShiftRad = (((zProfile.customPhaseShift ?? 0) * Math.PI) / 180)
   const clearance = 0.05
   const yEnd = yStart + height
   const yLimit = Math.max(Math.abs(yStart), Math.abs(yEnd), 1e-6)
@@ -39,7 +40,7 @@ export function buildZProfilePoints(
         : 0
 
   function waveUnit(shape: WallZProfile['customShape'], t: number): number {
-    const phase = 2 * Math.PI * customFrequency * t
+    const phase = 2 * Math.PI * customFrequency * t + customPhaseShiftRad
 
     if (shape === 'sine') {
       return Math.sin(phase)

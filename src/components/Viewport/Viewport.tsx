@@ -4,7 +4,7 @@
 // 3D viewport component. Renders a @react-three/fiber Canvas with the
 // preview / CAD mode toggle, STL/STEP export panel, and three R3F sub-components:
 //   - WallSweepPreview  — the solid 3D mesh
-//   - BasePathPreview   — 2D base-shape outline + orange hinge line
+//   - BasePathPreview   — 2D base-shape outline
 //   - ZProfileGuide     — wall Z-profile cross-section guide lines
 //
 // All geometry math lives in src/geometry/. Props: controls + zProfile.
@@ -17,9 +17,8 @@ import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js'
 import { Mesh, DoubleSide } from 'three'
 import { exportStepBlob, rebuildOpenCascadeStepCache } from '@/geometry/export/exportSTEP'
 import type { LidConfig, SketchControls, WallZProfile } from '@/types/sketch'
-import { buildBaseShapePoints, getEffectiveBaseDimensions } from '@/geometry/baseShape'
-import { buildZProfilePoints } from '@/geometry/zProfile'
-import { buildWallSweepGeometry } from '@/geometry/wallSweep'
+import { buildBaseShapePoints } from '@/geometry/baseShape'
+import { buildWallSweepGeometry, resolveEffectiveZProfilePoints } from '@/geometry/wallSweep'
 import { buildLidGeometry } from '@/geometry/lid'
 import { SceneSetup } from './SceneSetup'
 
@@ -27,20 +26,16 @@ interface ViewportProps {
   controls: SketchControls
   zProfile: WallZProfile
   lidConfig: LidConfig
+  onControlsChange: (patch: Partial<SketchControls>) => void
 }
 
 type RenderStyle = 'shaded' | 'wireframe'
+type ProjectionMode = 'perspective' | 'orthographic'
 
 function BasePathPreview({ controls, zProfile }: { controls: SketchControls; zProfile: WallZProfile }) {
-  const { pathPoints, hingeLine3D } = useMemo(() => {
+  const pathPoints = useMemo(() => {
     const path = buildBaseShapePoints(controls, zProfile.wallThickness)
-    const { outerX } = getEffectiveBaseDimensions(controls, zProfile.wallThickness)
-    // Hinge endpoints are always at ±outerX/2 on Y=0 after centering, regardless of corner mods.
-    const hx = outerX / 2
-    return {
-      pathPoints: path,
-      hingeLine3D: [[-hx, 0, 0], [hx, 0, 0]] as [number, number, number][],
-    }
+    return path
   }, [controls, zProfile.wallThickness])
 
   if (pathPoints.length < 2) return null
@@ -52,7 +47,6 @@ function BasePathPreview({ controls, zProfile }: { controls: SketchControls; zPr
   return (
     <group>
       <Line points={closedOutline3D} color="#7db7ff" lineWidth={2.5} depthTest={false} />
-      <Line points={hingeLine3D} color="#ff8b3d" lineWidth={4} depthTest={false} />
     </group>
   )
 }
@@ -60,20 +54,51 @@ function BasePathPreview({ controls, zProfile }: { controls: SketchControls; zPr
 function ZProfileGuide({ controls, zProfile }: { controls: SketchControls; zProfile: WallZProfile }) {
   const { outerLine, innerLine, topLine, bottomLine } = useMemo(() => {
     const profileHeight = Math.max(20, controls.boxHeight)
-    const { outer, inner } = buildZProfilePoints(zProfile, profileHeight)
-    // Hinge midpoint is always at the origin after centering.
-    const hingeMidX = 0
+    const { outer, inner } = resolveEffectiveZProfilePoints(controls, zProfile, profileHeight)
+    const basePath = buildBaseShapePoints(controls, zProfile.wallThickness)
+
+    // Anchor the profile guide to where the base path intersects the Y-axis (x=0).
+    // This keeps the guide attached even when path modifiers move the shape.
+    let baseAxisZ = 0
+    let bestAbsZ = Number.POSITIVE_INFINITY
+
+    for (let i = 0; i < basePath.length; i += 1) {
+      const a = basePath[i]
+      const b = basePath[(i + 1) % basePath.length]
+      const dx = b[0] - a[0]
+
+      if (Math.abs(dx) < 1e-9) {
+        if (Math.abs(a[0]) < 1e-6) {
+          const candidate = (a[1] + b[1]) * 0.5
+          if (Math.abs(candidate) < bestAbsZ) {
+            bestAbsZ = Math.abs(candidate)
+            baseAxisZ = candidate
+          }
+        }
+        continue
+      }
+
+      const t = -a[0] / dx
+      if (t < -1e-6 || t > 1 + 1e-6) continue
+      const z = a[1] + (b[1] - a[1]) * t
+      if (Math.abs(z) < bestAbsZ) {
+        bestAbsZ = Math.abs(z)
+        baseAxisZ = z
+      }
+    }
+
+    const axisX = 0
 
     return {
-      outerLine: outer.map(([z, y]) => [hingeMidX, y, z] as [number, number, number]),
-      innerLine: inner.map(([z, y]) => [hingeMidX, y, z] as [number, number, number]),
+      outerLine: outer.map(([z, y]) => [axisX, y, baseAxisZ + z] as [number, number, number]),
+      innerLine: inner.map(([z, y]) => [axisX, y, baseAxisZ + z] as [number, number, number]),
       topLine: [
-        [hingeMidX, outer[outer.length - 1][1], outer[outer.length - 1][0]] as [number, number, number],
-        [hingeMidX, inner[inner.length - 1][1], inner[inner.length - 1][0]] as [number, number, number],
+        [axisX, outer[outer.length - 1][1], baseAxisZ + outer[outer.length - 1][0]] as [number, number, number],
+        [axisX, inner[inner.length - 1][1], baseAxisZ + inner[inner.length - 1][0]] as [number, number, number],
       ],
       bottomLine: [
-        [hingeMidX, outer[0][1], outer[0][0]] as [number, number, number],
-        [hingeMidX, inner[0][1], inner[0][0]] as [number, number, number],
+        [axisX, outer[0][1], baseAxisZ + outer[0][0]] as [number, number, number],
+        [axisX, inner[0][1], baseAxisZ + inner[0][0]] as [number, number, number],
       ],
     }
   }, [controls, zProfile])
@@ -166,7 +191,7 @@ function LidPreview({
   )
 }
 
-export function Viewport({ controls, zProfile, lidConfig }: ViewportProps) {
+export function Viewport({ controls, zProfile, lidConfig, onControlsChange }: ViewportProps) {
   const [renderMode, setRenderMode] = useState<'preview' | 'cad'>('preview')
   const [exportFormat, setExportFormat] = useState<'stl' | 'step'>('stl')
   const [exporting, setExporting] = useState(false)
@@ -178,8 +203,23 @@ export function Viewport({ controls, zProfile, lidConfig }: ViewportProps) {
   const [showBox, setShowBox] = useState(true)
   const [showLid, setShowLid] = useState(true)
   const [renderStyle, setRenderStyle] = useState<RenderStyle>('shaded')
+  const [projectionMode, setProjectionMode] = useState<ProjectionMode>('perspective')
   const [showGrid, setShowGrid] = useState(true)
   const [showAxes, setShowAxes] = useState(true)
+  const [showBaseShape, setShowBaseShape] = useState(true)
+  const [showWallProfile, setShowWallProfile] = useState(true)
+  const [controlsCollapsed, setControlsCollapsed] = useState(false)
+  const [appearanceCollapsed, setAppearanceCollapsed] = useState(true)
+
+  const collapsibleHeaderStyle = {
+    fontSize: 11,
+    color: '#8ea0b8',
+    cursor: 'pointer',
+    userSelect: 'none' as const,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  }
 
   useEffect(() => {
     if (renderMode !== 'cad') return
@@ -296,47 +336,102 @@ export function Viewport({ controls, zProfile, lidConfig }: ViewportProps) {
           minWidth: 176,
         }}
       >
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button
-            onClick={() => setRenderMode('preview')}
-            style={{
-              flex: 1,
-              borderRadius: 6,
-              border: renderMode === 'preview' ? '2px solid #5f83b1' : '1px solid #2b3747',
-              background: renderMode === 'preview' ? '#243447' : '#151d27',
-              color: renderMode === 'preview' ? '#edf4ff' : '#b0bfce',
-              padding: '6px 8px',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            Preview
-          </button>
-          <button
-            onClick={() => setRenderMode('cad')}
-            style={{
-              flex: 1,
-              borderRadius: 6,
-              border: renderMode === 'cad' ? '2px solid #5f83b1' : '1px solid #2b3747',
-              background: renderMode === 'cad' ? '#243447' : '#151d27',
-              color: renderMode === 'cad' ? '#edf4ff' : '#b0bfce',
-              padding: '6px 8px',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            CAD
-          </button>
-        </div>
-        <div style={{ fontSize: 11, color: '#8ea0b8' }}>
-          {renderMode === 'preview'
-            ? 'Fast mesh updates while dragging controls.'
-            : isCadUpdating
-              ? 'CAD mode updating...'
-              : cadStatus || 'CAD mode ready.'}
+        <div
+          onClick={() => setControlsCollapsed((value) => !value)}
+          style={collapsibleHeaderStyle}
+          title={controlsCollapsed ? 'Expand controls' : 'Collapse controls'}
+        >
+          <span>View Controls</span>
+          <span>{controlsCollapsed ? '+' : '−'}</span>
         </div>
 
-        <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
+        {!controlsCollapsed && (
+          <>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                onClick={() => setRenderMode('preview')}
+                style={{
+                  flex: 1,
+                  borderRadius: 6,
+                  border: renderMode === 'preview' ? '2px solid #5f83b1' : '1px solid #2b3747',
+                  background: renderMode === 'preview' ? '#243447' : '#151d27',
+                  color: renderMode === 'preview' ? '#edf4ff' : '#b0bfce',
+                  padding: '6px 8px',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                }}
+              >
+                Preview
+              </button>
+              <button
+                onClick={() => setRenderMode('cad')}
+                style={{
+                  flex: 1,
+                  borderRadius: 6,
+                  border: renderMode === 'cad' ? '2px solid #5f83b1' : '1px solid #2b3747',
+                  background: renderMode === 'cad' ? '#243447' : '#151d27',
+                  color: renderMode === 'cad' ? '#edf4ff' : '#b0bfce',
+                  padding: '6px 8px',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                }}
+              >
+                CAD
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: '#8ea0b8' }}>
+              {renderMode === 'preview'
+                ? 'Fast mesh updates while dragging controls.'
+                : isCadUpdating
+                  ? 'CAD mode updating...'
+                  : cadStatus || 'CAD mode ready.'}
+            </div>
+
+            <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
+              <div
+                onClick={() => setAppearanceCollapsed((value) => !value)}
+                style={collapsibleHeaderStyle}
+                title={appearanceCollapsed ? 'Expand appearance controls' : 'Collapse appearance controls'}
+              >
+                <span>Appearance</span>
+                <span>{appearanceCollapsed ? '+' : '−'}</span>
+              </div>
+              {!appearanceCollapsed && (
+                <>
+                  <label style={{ display: 'grid', gap: 6 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, alignItems: 'center' }}>
+                      <span style={{ color: '#b8c6d8', fontSize: 12 }}>Transparency</span>
+                      <span style={{ color: '#aab8cc', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+                        {Math.round((1 - (controls.boxOpacity ?? 0.55)) * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.05}
+                      max={1}
+                      step={0.01}
+                      value={controls.boxOpacity ?? 0.55}
+                      onChange={(event) => onControlsChange({ boxOpacity: Number(event.target.value) })}
+                    />
+                  </label>
+
+                  <label style={{ display: 'grid', gap: 6 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, alignItems: 'center' }}>
+                      <span style={{ color: '#b8c6d8', fontSize: 12 }}>Color</span>
+                      <span style={{ color: '#aab8cc', fontSize: 12 }}>{(controls.boxColor ?? '#5f87b8').toUpperCase()}</span>
+                    </div>
+                    <input
+                      type="color"
+                      value={controls.boxColor ?? '#5f87b8'}
+                      onChange={(event) => onControlsChange({ boxColor: event.target.value })}
+                      style={{ width: '100%', height: 30, border: '1px solid #2b3747', borderRadius: 6, background: '#151d27' }}
+                    />
+                  </label>
+                </>
+              )}
+            </div>
+
+            <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
           <div style={{ fontSize: 11, color: '#8ea0b8' }}>Render</div>
           <div style={{ display: 'flex', gap: 6 }}>
             <button
@@ -368,6 +463,39 @@ export function Viewport({ controls, zProfile, lidConfig }: ViewportProps) {
               }}
             >
               Wireframe
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: '#8ea0b8' }}>View</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={() => setProjectionMode('perspective')}
+              style={{
+                flex: 1,
+                borderRadius: 6,
+                border: projectionMode === 'perspective' ? '2px solid #5f83b1' : '1px solid #2b3747',
+                background: projectionMode === 'perspective' ? '#243447' : '#151d27',
+                color: projectionMode === 'perspective' ? '#edf4ff' : '#b0bfce',
+                padding: '6px 8px',
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+            >
+              Perspective
+            </button>
+            <button
+              onClick={() => setProjectionMode('orthographic')}
+              style={{
+                flex: 1,
+                borderRadius: 6,
+                border: projectionMode === 'orthographic' ? '2px solid #5f83b1' : '1px solid #2b3747',
+                background: projectionMode === 'orthographic' ? '#243447' : '#151d27',
+                color: projectionMode === 'orthographic' ? '#edf4ff' : '#b0bfce',
+                padding: '6px 8px',
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+            >
+              Orthographic
             </button>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -404,7 +532,7 @@ export function Viewport({ controls, zProfile, lidConfig }: ViewportProps) {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
+            <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
           <div style={{ fontSize: 11, color: '#8ea0b8' }}>Visibility</div>
           <div style={{ display: 'flex', gap: 6 }}>
             <button
@@ -439,9 +567,41 @@ export function Viewport({ controls, zProfile, lidConfig }: ViewportProps) {
               Lid
             </button>
           </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={() => setShowBaseShape((v) => !v)}
+              style={{
+                flex: 1,
+                borderRadius: 6,
+                border: showBaseShape ? '2px solid #5f83b1' : '1px solid #2b3747',
+                background: showBaseShape ? '#243447' : '#151d27',
+                color: showBaseShape ? '#edf4ff' : '#b0bfce',
+                padding: '6px 8px',
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+            >
+              Base Shape
+            </button>
+            <button
+              onClick={() => setShowWallProfile((v) => !v)}
+              style={{
+                flex: 1,
+                borderRadius: 6,
+                border: showWallProfile ? '2px solid #5f83b1' : '1px solid #2b3747',
+                background: showWallProfile ? '#243447' : '#151d27',
+                color: showWallProfile ? '#edf4ff' : '#b0bfce',
+                padding: '6px 8px',
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+            >
+              Wall Profile
+            </button>
+          </div>
         </div>
 
-        <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
+            <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
           <div style={{ fontSize: 11, color: '#8ea0b8' }}>Export</div>
           <div style={{ display: 'flex', gap: 6 }}>
             <select
@@ -477,15 +637,18 @@ export function Viewport({ controls, zProfile, lidConfig }: ViewportProps) {
               {exporting ? 'Exporting...' : 'Export'}
             </button>
           </div>
-        </div>
+            </div>
+          </>
+        )}
       </div>
 
       <Canvas
+        orthographic={projectionMode === 'orthographic'}
         camera={{
-          fov: 50,
           near: 0.1,
           far: 2000,
-          position: [120, 120, 120], // default is Y-up
+          position: [120, 120, 120],
+          ...(projectionMode === 'orthographic' ? { zoom: 8 } : { fov: 50 }),
         }}
         style={{ background: '#1b232d' }}
       >
@@ -507,8 +670,8 @@ export function Viewport({ controls, zProfile, lidConfig }: ViewportProps) {
             renderStyle={renderStyle}
           />
         )}
-        <BasePathPreview controls={activeControls} zProfile={activeZProfile} />
-        <ZProfileGuide controls={activeControls} zProfile={activeZProfile} />
+        {showBaseShape && <BasePathPreview controls={activeControls} zProfile={activeZProfile} />}
+        {showWallProfile && <ZProfileGuide controls={activeControls} zProfile={activeZProfile} />}
       </Canvas>
     </div>
   )

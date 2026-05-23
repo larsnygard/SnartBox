@@ -1,5 +1,14 @@
-import type { SketchControls, CornerMode, PathWaveShape } from '@/types/sketch'
+import type { SketchControls, BaseShape, CornerMode, PathWaveShape, PathWaveScope } from '@/types/sketch'
 import type { Point2 } from './types'
+
+export function getBaseShapeSideCount(shape: BaseShape): number | null {
+  if (shape === 'circle') return null
+  if (shape === 'square') return 4
+  if (shape === 'triangle') return 3
+  if (shape === 'pentagon') return 5
+  if (shape === 'hexagon') return 6
+  return 8
+}
 
 export function getEffectiveBaseDimensions(controls: SketchControls, wallThickness = 0) {
   const dimensionX = Math.max(1, controls.scaleX)
@@ -12,13 +21,25 @@ export function getEffectiveBaseDimensions(controls: SketchControls, wallThickne
   }
 }
 
-export function centerPathOnHingeMidpoint(path: Point2[]): Point2[] {
-  if (path.length < 2) return path
+export function centerPathOnBoundsCenter(path: Point2[]): Point2[] {
+  if (path.length < 1) return path
 
-  const hingeMidX = (path[0][0] + path[1][0]) * 0.5
-  const hingeMidY = (path[0][1] + path[1][1]) * 0.5
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
 
-  return path.map(([x, y]) => [x - hingeMidX, y - hingeMidY] as Point2)
+  for (const [x, y] of path) {
+    minX = Math.min(minX, x)
+    maxX = Math.max(maxX, x)
+    minY = Math.min(minY, y)
+    maxY = Math.max(maxY, y)
+  }
+
+  const centerX = (minX + maxX) * 0.5
+  const centerY = (minY + maxY) * 0.5
+
+  return path.map(([x, y]) => [x - centerX, y - centerY] as Point2)
 }
 
 export function sanitizeClosedPath(path: Point2[]): Point2[] {
@@ -29,36 +50,6 @@ export function sanitizeClosedPath(path: Point2[]): Point2[] {
   const isDuplicateEnd = Math.hypot(lx - fx, lz - fz) < 1e-6
 
   return isDuplicateEnd ? path.slice(0, -1) : path
-}
-
-export function moveSeamToHingeMidpoint(path: Point2[]): Point2[] {
-  if (path.length < 3) return path
-
-  // The hinge midpoint is always at the origin (path is centered on it).
-  // Find the edge that contains (0, 0) and start the loop from there.
-  const n = path.length
-  for (let i = 0; i < n; i += 1) {
-    const a = path[i]
-    const b = path[(i + 1) % n]
-    const dx = b[0] - a[0]
-    const dz = b[1] - a[1]
-    const lenSq = dx * dx + dz * dz
-    if (lenSq < 1e-12) continue
-    const t = (-a[0] * dx + -a[1] * dz) / lenSq
-    if (t < -1e-6 || t > 1 + 1e-6) continue
-    const px = a[0] + t * dx
-    const pz = a[1] + t * dz
-    if (Math.hypot(px, pz) > 0.5) continue
-    // Origin lies on edge i → (i+1). Rearrange so the loop starts from (0, 0).
-    const nextIdx = (i + 1) % n
-    return [[0, 0] as Point2, ...path.slice(nextIdx), ...path.slice(0, nextIdx)]
-  }
-
-  // Fallback: no edge contains origin, use midpoint of first segment.
-  const p0 = path[0]
-  const p1 = path[1]
-  const hingeMid: Point2 = [(p0[0] + p1[0]) * 0.5, (p0[1] + p1[1]) * 0.5]
-  return [hingeMid, ...path.slice(1), p0]
 }
 
 export function polygonSignedArea(path: Point2[]): number {
@@ -166,12 +157,18 @@ export function applyPathWaveModifier(
   shape: PathWaveShape,
   amplitude: number,
   frequency: number,
+  phaseShiftDegrees: number,
+  scope: PathWaveScope,
+  selectedSides: number[],
+  cornerMatched = false,
 ): Point2[] {
   if (pts.length < 2 || amplitude <= 0 || frequency <= 0) {
     return pts
   }
 
   const cycles = Math.max(1, Math.round(frequency))
+  const selectedSet = new Set(selectedSides)
+  const useSideSelection = scope === 'perSide' && selectedSet.size > 0
   const perimeter = pts.reduce((total, point, index) => {
     const next = pts[(index + 1) % pts.length]
     return total + Math.hypot(next[0] - point[0], next[1] - point[1])
@@ -184,6 +181,7 @@ export function applyPathWaveModifier(
   const samplesPerCycle = 32
   const targetStep = perimeter / (cycles * samplesPerCycle)
   const orientation = polygonSignedArea(pts) >= 0 ? 1 : -1
+  const phaseShiftRad = ((phaseShiftDegrees ?? 0) * Math.PI) / 180
   const wavePts: Point2[] = []
 
   let distanceAlong = 0
@@ -200,11 +198,15 @@ export function applyPathWaveModifier(
     const stepCount = Math.max(1, Math.ceil(segmentLength / targetStep))
     const normalX = orientation > 0 ? dy / segmentLength : -dy / segmentLength
     const normalY = orientation > 0 ? -dx / segmentLength : dx / segmentLength
+    const cornerFlip = cornerMatched && i % 2 === 1 ? -1 : 1
 
     for (let step = 0; step < stepCount; step += 1) {
       const t = step / stepCount
-      const phase = ((distanceAlong + t * segmentLength) / perimeter) * cycles * 2 * Math.PI
-      const waveValue = getWaveValue(shape, phase)
+      const wholePhase = ((distanceAlong + t * segmentLength) / perimeter) * cycles * 2 * Math.PI
+      const sidePhase = t * cycles * 2 * Math.PI
+      const phase = (scope === 'perSide' ? sidePhase : wholePhase) + phaseShiftRad
+      const isSideEnabled = !useSideSelection || selectedSet.has(i)
+      const waveValue = isSideEnabled ? getWaveValue(shape, phase) * cornerFlip : 0
       const baseX = start[0] + dx * t
       const baseY = start[1] + dy * t
       wavePts.push([
@@ -222,37 +224,26 @@ export function applyPathWaveModifier(
 export function buildBaseShapePoints(controls: SketchControls, wallThickness = 0): Point2[] {
   const { outerX, outerY } = getEffectiveBaseDimensions(controls, wallThickness)
 
-  if (controls.shape === 'circleFlat') {
-    const chordWidth = outerX
-    const halfChord = chordWidth / 2
-    const centerOffset = Math.max(-halfChord, controls.circleCenterOffset)
-    const centerX = halfChord
-    const centerY = centerOffset
-    const radius = Math.hypot(halfChord, centerOffset)
-    const startAngle = Math.atan2(-centerY, chordWidth - centerX)
-    let endAngle = Math.atan2(-centerY, -centerX)
-
-    if (endAngle <= startAngle) {
-      endAngle += 2 * Math.PI
+  if (controls.shape === 'circle') {
+    const radiusX = outerX * 0.5
+    const radiusY = outerY * 0.5
+    const arcSegments = 96
+    const circlePoints: Point2[] = []
+    for (let i = 0; i < arcSegments; i += 1) {
+      const angle = (i / arcSegments) * Math.PI * 2
+      circlePoints.push([radiusX * Math.cos(angle), radiusY * Math.sin(angle)])
     }
 
-    const arcSegments = 64
-    const circlePoints: Point2[] = [[0, 0], [chordWidth, 0]]
-    for (let i = 1; i <= arcSegments; i += 1) {
-      const t = i / arcSegments
-      const angle = startAngle + (endAngle - startAngle) * t
-      circlePoints.push([
-        centerX + radius * Math.cos(angle),
-        centerY + radius * Math.sin(angle),
-      ])
-    }
-
-    const centered = centerPathOnHingeMidpoint(circlePoints)
+    const centered = centerPathOnBoundsCenter(circlePoints)
     return applyPathWaveModifier(
       centered,
       controls.pathWaveShape,
       controls.pathWaveAmplitude,
       controls.pathWaveFrequency,
+      controls.pathWavePhaseShift ?? 0,
+      controls.pathWaveScope,
+      controls.pathWaveSelectedSides,
+      controls.pathWaveCornerMatched,
     )
   }
 
@@ -280,13 +271,22 @@ export function buildBaseShapePoints(controls: SketchControls, wallThickness = 0
   }
 
   let pts: Point2[] = raw.map(([x, y]) => [x * outerX, y * outerY])
-  pts = centerPathOnHingeMidpoint(pts)
+  pts = centerPathOnBoundsCenter(pts)
 
   if (controls.cornerMode !== 'none' && controls.cornerRadius > 0) {
     pts = applyCornerModifier(pts, controls.cornerMode, controls.cornerRadius)
   }
 
-  pts = applyPathWaveModifier(pts, controls.pathWaveShape, controls.pathWaveAmplitude, controls.pathWaveFrequency)
+  pts = applyPathWaveModifier(
+    pts,
+    controls.pathWaveShape,
+    controls.pathWaveAmplitude,
+    controls.pathWaveFrequency,
+    controls.pathWavePhaseShift ?? 0,
+    controls.pathWaveScope,
+    controls.pathWaveSelectedSides,
+    controls.pathWaveCornerMatched,
+  )
 
   return pts
 }

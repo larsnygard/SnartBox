@@ -11,7 +11,7 @@
 //       1. ShapePanel        (box profile selector)
 //       2. DimensionsPanel   (width, depth, height sliders)
 //       3. WallPanel         (wall thickness, floor thickness, corner radius)
-//       4. LidPanel          (lid type, hinge options, snap tab params)
+//       4. LidPanel          (lid type and fit parameters)
 //       5. TexturePanel      (pattern picker, depth/scale sliders, face selector)
 //       6. DividersPanel     (column/row count sliders)
 //       7. GridfinityPanel   (enable toggle, NxM grid, Zu height, hole options)
@@ -20,18 +20,20 @@
 // All user interactions call the appropriate Zustand store setters.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { CSSProperties } from 'react'
+import { useState, type CSSProperties } from 'react'
 import type {
   BaseShape,
   CornerMode,
   CustomZProfileShape,
   LidConfig,
+  PathWaveScope,
   PathWaveShape,
   SketchControls,
   WallProfileAnchor,
   WallZProfile,
   WallZProfileType,
 } from '@/types/sketch'
+import { getBaseShapeSideCount } from '@/geometry/baseShape'
 import { LidPanel } from './LidPanel'
 
 interface ParameterPanelProps {
@@ -45,7 +47,7 @@ interface ParameterPanelProps {
 
 const SHAPE_OPTIONS: Array<{ value: BaseShape; label: string }> = [
   { value: 'square', label: 'Square' },
-  { value: 'circleFlat', label: 'Circle + Flat Hinge Side' },
+  { value: 'circle', label: 'Circle' },
   { value: 'triangle', label: 'Triangle' },
   { value: 'pentagon', label: 'Pentagon' },
   { value: 'hexagon', label: 'Hexagon' },
@@ -56,6 +58,11 @@ const PATH_WAVE_OPTIONS: Array<{ value: PathWaveShape; label: string }> = [
   { value: 'sine', label: 'Sine' },
   { value: 'square', label: 'Square' },
   { value: 'triangle', label: 'Triangle' },
+]
+
+const PATH_WAVE_SCOPE_OPTIONS: Array<{ value: PathWaveScope; label: string }> = [
+  { value: 'whole', label: 'Whole Shape' },
+  { value: 'perSide', label: 'Per Side' },
 ]
 
 const CUSTOM_SHAPE_OPTIONS: Array<{ value: CustomZProfileShape; label: string }> = [
@@ -70,6 +77,10 @@ const PROFILE_ANCHOR_OPTIONS: Array<{ value: WallProfileAnchor; label: string }>
   { value: 'inner', label: 'Inner' },
 ]
 
+type AccordionSection = 'baseShape' | 'pathWave' | 'zProfile' | 'lid'
+
+const COLLAPSIBLE_SECTIONS: AccordionSection[] = ['baseShape', 'pathWave', 'zProfile', 'lid']
+
 export function ParameterPanel({
   controls,
   zProfile,
@@ -78,6 +89,20 @@ export function ParameterPanel({
   onZProfileChange,
   onLidConfigChange,
 }: ParameterPanelProps) {
+  const [openSections, setOpenSections] = useState<Record<AccordionSection, boolean>>({
+    baseShape: true,
+    pathWave: false,
+    zProfile: false,
+    lid: false,
+  })
+  const pathSideCount = getBaseShapeSideCount(controls.shape)
+  const twistDegrees = controls.twistDegrees ?? 0
+  const pathWavePhaseShift = controls.pathWavePhaseShift ?? 0
+  const customProfilePhaseShift = zProfile.customPhaseShift ?? 0
+  const allPathSides = pathSideCount === null
+    ? []
+    : Array.from({ length: pathSideCount }, (_, index) => index)
+
   const sectionTitleStyle: CSSProperties = {
     color: '#dce6f5',
     fontSize: 12,
@@ -100,6 +125,29 @@ export function ParameterPanel({
     color: '#aab8cc',
     fontSize: 12,
     fontVariantNumeric: 'tabular-nums',
+  }
+
+  const accordionHeaderStyle = (active: boolean): CSSProperties => ({
+    ...sectionTitleStyle,
+    marginBottom: active ? 12 : 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    cursor: 'pointer',
+    userSelect: 'none',
+  })
+
+  const setAllSections = (isOpen: boolean) => {
+    setOpenSections({
+      baseShape: isOpen,
+      pathWave: isOpen,
+      zProfile: isOpen,
+      lid: isOpen,
+    })
+  }
+
+  const toggleSection = (section: AccordionSection) => {
+    setOpenSections((prev) => ({ ...prev, [section]: !prev[section] }))
   }
 
   const profileButtonStyle = (active: boolean): CSSProperties => ({
@@ -130,9 +178,33 @@ export function ParameterPanel({
         overflowY: 'auto',
       }}
     >
+      <section style={{ width: '100%', marginTop: -4 }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => setAllSections(true)}
+            style={profileButtonStyle(COLLAPSIBLE_SECTIONS.every((section) => openSections[section]))}
+          >
+            Expand All
+          </button>
+          <button
+            onClick={() => setAllSections(false)}
+            style={profileButtonStyle(COLLAPSIBLE_SECTIONS.every((section) => !openSections[section]))}
+          >
+            Close All
+          </button>
+        </div>
+      </section>
+
       <section style={{ width: '100%' }}>
-        <div style={sectionTitleStyle}>Base Shape</div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+        <div
+          style={accordionHeaderStyle(openSections.baseShape)}
+          onClick={() => toggleSection('baseShape')}
+        >
+          <span>Base Shape</span>
+          <span>{openSections.baseShape ? '−' : '+'}</span>
+        </div>
+        {openSections.baseShape && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
           {SHAPE_OPTIONS.map((option) => {
             const isActive = controls.shape === option.value
             return (
@@ -159,12 +231,21 @@ export function ParameterPanel({
               </button>
             )
           })}
-        </div>
+          </div>
+        )}
       </section>
 
       <section style={{ width: '100%' }}>
-        <div style={sectionTitleStyle}>Path Wave Modifier</div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        <div
+          style={accordionHeaderStyle(openSections.pathWave)}
+          onClick={() => toggleSection('pathWave')}
+        >
+          <span>Path Wave Modifier</span>
+          <span>{openSections.pathWave ? '−' : '+'}</span>
+        </div>
+        {openSections.pathWave && (
+          <>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
           {PATH_WAVE_OPTIONS.map((option) => {
             const isActive = controls.pathWaveShape === option.value
             return (
@@ -177,9 +258,9 @@ export function ParameterPanel({
               </button>
             )
           })}
-        </div>
+            </div>
 
-        <div style={{ display: 'grid', gap: 14 }}>
+            <div style={{ display: 'grid', gap: 14 }}>
           <label style={{ display: 'grid', gap: 6 }}>
             <div style={sliderRowStyle}>
               <span style={{ color: '#b8c6d8' }}>Amplitude</span>
@@ -212,7 +293,97 @@ export function ParameterPanel({
               Whole cycles keep the seam in phase and avoid artifacts.
             </div>
           </label>
-        </div>
+
+          <label style={{ display: 'grid', gap: 6 }}>
+            <div style={sliderRowStyle}>
+              <span style={{ color: '#b8c6d8' }}>Phase Shift</span>
+              <span style={valueBadgeStyle}>{pathWavePhaseShift.toFixed(0)}&deg;</span>
+            </div>
+            <input
+              type="range"
+              min={-180}
+              max={180}
+              step={1}
+              value={pathWavePhaseShift}
+              onChange={(e) => onControlsChange({ pathWavePhaseShift: Number(e.target.value) })}
+            />
+          </label>
+
+          <div style={{ display: 'grid', gap: 6 }}>
+            <div style={{ color: '#b8c6d8' }}>Scope</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {PATH_WAVE_SCOPE_OPTIONS.map((option) => {
+                const isActive = controls.pathWaveScope === option.value
+                const isDisabled = option.value === 'perSide' && pathSideCount === null
+                return (
+                  <button
+                    key={option.value}
+                    onClick={() => {
+                      if (isDisabled) return
+                      onControlsChange(
+                        option.value === 'perSide'
+                          ? { pathWaveScope: option.value, pathWaveSelectedSides: allPathSides }
+                          : { pathWaveScope: option.value },
+                      )
+                    }}
+                    disabled={isDisabled}
+                    style={{
+                      ...profileButtonStyle(isActive),
+                      opacity: isDisabled ? 0.5 : 1,
+                      cursor: isDisabled ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {option.label}
+                  </button>
+                )
+              })}
+            </div>
+            {pathSideCount === null && (
+              <div style={{ fontSize: 11, color: '#637080' }}>
+                Per-side mode is only available for polygon shapes.
+              </div>
+            )}
+          </div>
+
+          {controls.pathWaveScope === 'perSide' && pathSideCount !== null && (
+            <div style={{ display: 'grid', gap: 6 }}>
+              <div style={{ color: '#b8c6d8' }}>Modified Sides</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {allPathSides.map((sideIndex) => {
+                  const isActive = controls.pathWaveSelectedSides.includes(sideIndex)
+                  return (
+                    <button
+                      key={`path-side-${sideIndex}`}
+                      onClick={() => {
+                        const nextSides = isActive
+                          ? controls.pathWaveSelectedSides.filter((index) => index !== sideIndex)
+                          : [...controls.pathWaveSelectedSides, sideIndex].sort((a, b) => a - b)
+                        onControlsChange({ pathWaveSelectedSides: nextSides })
+                      }}
+                      style={profileButtonStyle(isActive)}
+                    >
+                      {`Side ${sideIndex + 1}`}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#b8c6d8' }}>
+            <input
+              type="checkbox"
+              checked={controls.pathWaveCornerMatched}
+              onChange={(e) => onControlsChange({ pathWaveCornerMatched: e.target.checked })}
+            />
+            <span>Flip Wave at Corners</span>
+          </label>
+          <div style={{ fontSize: 11, color: '#637080', marginTop: -8 }}>
+            Alternates wave polarity at each corner to avoid convex/concave corner buildup.
+          </div>
+            </div>
+          </>
+        )}
       </section>
 
       {/* Shape Modifiers — polygon corners */}
@@ -251,49 +422,8 @@ export function ParameterPanel({
         </section>
       )}
 
-      {/* Shape Modifiers — circle hinge angle */}
-      {controls.shape === 'circleFlat' && (
-        <section style={{ width: '100%' }}>
-          <div style={sectionTitleStyle}>Circle</div>
-          <label style={{ display: 'grid', gap: 6 }}>
-            <div style={sliderRowStyle}>
-              <span style={{ color: '#b8c6d8' }}>Center Offset</span>
-              <span style={valueBadgeStyle}>{controls.circleCenterOffset.toFixed(1)} mm</span>
-            </div>
-            <input
-              type="range"
-              min={-(controls.scaleX + (controls.useInnerDimensions ? zProfile.wallThickness * 2 : 0)) / 2}
-              max={300}
-              step={0.5}
-              value={controls.circleCenterOffset}
-              onChange={(e) => onControlsChange({ circleCenterOffset: Number(e.target.value) })}
-            />
-            <input
-              type="number"
-              min={-(controls.scaleX + (controls.useInnerDimensions ? zProfile.wallThickness * 2 : 0)) / 2}
-              max={300}
-              step={0.5}
-              value={controls.circleCenterOffset}
-              onChange={(e) => onControlsChange({ circleCenterOffset: Number(e.target.value) })}
-              style={{
-                padding: '6px 10px',
-                borderRadius: 6,
-                background: '#151d27',
-                color: '#b0bfce',
-                border: '1px solid #2b3747',
-                fontSize: 13,
-              }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#637080', marginTop: 2 }}>
-              <span>Wraps further around</span>
-              <span>Flatter arc</span>
-            </div>
-          </label>
-        </section>
-      )}
-
       <section style={{ width: '100%' }}>
-        <div style={sectionTitleStyle}>Shape Dimensions</div>
+        <div style={sectionTitleStyle}>Dimensions</div>
         <div style={{ display: 'grid', gap: 14 }}>
           <label style={{ display: 'grid', gap: 6 }}>
             <div style={sliderRowStyle}>
@@ -325,6 +455,39 @@ export function ParameterPanel({
             />
           </label>
 
+          <label style={{ display: 'grid', gap: 6 }}>
+            <div style={sliderRowStyle}>
+              <span style={{ color: '#b8c6d8' }}>Box Height</span>
+              <span style={valueBadgeStyle}>{controls.boxHeight} mm</span>
+            </div>
+            <input
+              type="range"
+              min={10}
+              max={300}
+              step={1}
+              value={controls.boxHeight}
+              onChange={(e) => onControlsChange({ boxHeight: Number(e.target.value) })}
+            />
+          </label>
+
+          <label style={{ display: 'grid', gap: 6 }}>
+            <div style={sliderRowStyle}>
+              <span style={{ color: '#b8c6d8' }}>Twist</span>
+              <span style={valueBadgeStyle}>{twistDegrees.toFixed(0)}&deg;</span>
+            </div>
+            <input
+              type="range"
+              min={-360}
+              max={360}
+              step={1}
+              value={twistDegrees}
+              onChange={(e) => onControlsChange({ twistDegrees: Number(e.target.value) })}
+            />
+            <div style={{ fontSize: 11, color: '#637080' }}>
+              Total rotation from bottom to top.
+            </div>
+          </label>
+
           <label style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#b8c6d8' }}>
             <input
               type="checkbox"
@@ -340,59 +503,16 @@ export function ParameterPanel({
       </section>
 
       <section style={{ width: '100%' }}>
-        <div style={sectionTitleStyle}>Box Height</div>
-        <label style={{ display: 'grid', gap: 6 }}>
-          <div style={sliderRowStyle}>
-            <span style={{ color: '#b8c6d8' }}>Box Height</span>
-            <span style={valueBadgeStyle}>{controls.boxHeight} mm</span>
-          </div>
-          <input
-            type="range"
-            min={10}
-            max={300}
-            step={1}
-            value={controls.boxHeight}
-            onChange={(e) => onControlsChange({ boxHeight: Number(e.target.value) })}
-          />
-        </label>
-      </section>
-
-      <section style={{ width: '100%' }}>
-        <div style={sectionTitleStyle}>Appearance</div>
-        <div style={{ display: 'grid', gap: 10 }}>
-          <label style={{ display: 'grid', gap: 6 }}>
-            <div style={sliderRowStyle}>
-              <span style={{ color: '#b8c6d8' }}>Box Transparency</span>
-              <span style={valueBadgeStyle}>{Math.round((1 - controls.boxOpacity) * 100)}%</span>
-            </div>
-            <input
-              type="range"
-              min={0.05}
-              max={1}
-              step={0.01}
-              value={controls.boxOpacity}
-              onChange={(e) => onControlsChange({ boxOpacity: Number(e.target.value) })}
-            />
-          </label>
-
-          <label style={{ display: 'grid', gap: 6 }}>
-            <div style={sliderRowStyle}>
-              <span style={{ color: '#b8c6d8' }}>Box Color</span>
-              <span style={valueBadgeStyle}>{controls.boxColor.toUpperCase()}</span>
-            </div>
-            <input
-              type="color"
-              value={controls.boxColor}
-              onChange={(e) => onControlsChange({ boxColor: e.target.value })}
-              style={{ width: '100%', height: 34, border: '1px solid #2b3747', borderRadius: 6, background: '#151d27' }}
-            />
-          </label>
+        <div
+          style={accordionHeaderStyle(openSections.zProfile)}
+          onClick={() => toggleSection('zProfile')}
+        >
+          <span>Wall Z Profile</span>
+          <span>{openSections.zProfile ? '−' : '+'}</span>
         </div>
-      </section>
-
-      <section style={{ width: '100%' }}>
-        <div style={sectionTitleStyle}>Wall Z Profile</div>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+        {openSections.zProfile && (
+          <>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
           <button
             onClick={() => onZProfileChange({ type: 'straight' as WallZProfileType })}
             style={profileButtonStyle(zProfile.type === 'straight')}
@@ -405,9 +525,9 @@ export function ParameterPanel({
           >
             Custom
           </button>
-        </div>
+            </div>
 
-        <div style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
+            <div style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
           <div style={sliderRowStyle}>
             <span style={{ color: '#b8c6d8' }}>Sweep Anchor</span>
             <span style={valueBadgeStyle}>
@@ -425,18 +545,33 @@ export function ParameterPanel({
               </button>
             ))}
           </div>
-        </div>
+            </div>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#b8c6d8', marginBottom: 12 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#b8c6d8', marginBottom: 12 }}>
           <input
             type="checkbox"
             checked={zProfile.straightInnerWall}
             onChange={(e) => onZProfileChange({ straightInnerWall: e.target.checked })}
           />
           <span>Straight Inner Wall</span>
-        </label>
+            </label>
 
-        <div style={{ display: 'grid', gap: 10, marginBottom: 10 }}>
+            <div style={{ display: 'grid', gap: 10, marginBottom: 10 }}>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <div style={sliderRowStyle}>
+              <span style={{ color: '#b8c6d8' }}>Outside Draft Angle</span>
+              <span style={valueBadgeStyle}>{zProfile.outsideDraft}&deg;</span>
+            </div>
+            <input
+              type="range"
+              min={-45}
+              max={45}
+              step={0.5}
+              value={zProfile.outsideDraft}
+              onChange={(e) => onZProfileChange({ outsideDraft: Number(e.target.value) })}
+            />
+          </label>
+
           <label style={{ display: 'grid', gap: 6 }}>
             <div style={sliderRowStyle}>
               <span style={{ color: '#b8c6d8' }}>Inside Draft Angle</span>
@@ -452,25 +587,10 @@ export function ParameterPanel({
               onChange={(e) => onZProfileChange({ insideDraft: Number(e.target.value) })}
             />
           </label>
-
-          <label style={{ display: 'grid', gap: 6 }}>
-            <div style={sliderRowStyle}>
-              <span style={{ color: '#b8c6d8' }}>Outside Draft Angle</span>
-              <span style={valueBadgeStyle}>{zProfile.outsideDraft}&deg;</span>
             </div>
-            <input
-              type="range"
-              min={-45}
-              max={45}
-              step={0.5}
-              value={zProfile.outsideDraft}
-              onChange={(e) => onZProfileChange({ outsideDraft: Number(e.target.value) })}
-            />
-          </label>
-        </div>
 
-        {zProfile.type === 'custom' && (
-          <div style={{ display: 'grid', gap: 10, marginBottom: 10 }}>
+            {zProfile.type === 'custom' && (
+              <div style={{ display: 'grid', gap: 10, marginBottom: 10 }}>
             <label style={{ display: 'grid', gap: 6 }}>
               <div style={sliderRowStyle}>
                 <span style={{ color: '#b8c6d8' }}>Custom Profile</span>
@@ -527,10 +647,25 @@ export function ParameterPanel({
                 onChange={(e) => onZProfileChange({ customFrequency: Number(e.target.value) })}
               />
             </label>
-          </div>
-        )}
 
-        <label style={{ display: 'grid', gap: 6 }}>
+            <label style={{ display: 'grid', gap: 6 }}>
+              <div style={sliderRowStyle}>
+                <span style={{ color: '#b8c6d8' }}>Profile Phase Shift</span>
+                <span style={valueBadgeStyle}>{customProfilePhaseShift.toFixed(0)}&deg;</span>
+              </div>
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                step={1}
+                value={customProfilePhaseShift}
+                onChange={(e) => onZProfileChange({ customPhaseShift: Number(e.target.value) })}
+              />
+            </label>
+              </div>
+            )}
+
+            <label style={{ display: 'grid', gap: 6 }}>
           <div style={sliderRowStyle}>
             <span style={{ color: '#b8c6d8' }}>Wall Thickness</span>
             <span style={valueBadgeStyle}>{zProfile.wallThickness.toFixed(2)} mm</span>
@@ -543,9 +678,9 @@ export function ParameterPanel({
             value={zProfile.wallThickness}
             onChange={(e) => onZProfileChange({ wallThickness: Number(e.target.value) })}
           />
-        </label>
+            </label>
 
-        <label style={{ display: 'grid', gap: 6 }}>
+            <label style={{ display: 'grid', gap: 6 }}>
           <div style={sliderRowStyle}>
             <span style={{ color: '#b8c6d8' }}>Bottom Thickness</span>
             <span style={valueBadgeStyle}>{zProfile.bottomThickness.toFixed(2)} mm</span>
@@ -558,10 +693,23 @@ export function ParameterPanel({
             value={zProfile.bottomThickness}
             onChange={(e) => onZProfileChange({ bottomThickness: Number(e.target.value) })}
           />
-        </label>
+            </label>
+          </>
+        )}
       </section>
 
-      <LidPanel lid={lidConfig} onChange={onLidConfigChange} />
+      <section style={{ width: '100%' }}>
+        <div
+          style={accordionHeaderStyle(openSections.lid)}
+          onClick={() => toggleSection('lid')}
+        >
+          <span>Lid</span>
+          <span>{openSections.lid ? '−' : '+'}</span>
+        </div>
+        {openSections.lid && (
+          <LidPanel lid={lidConfig} onChange={onLidConfigChange} showTitle={false} />
+        )}
+      </section>
     </aside>
   )
 }

@@ -4,10 +4,8 @@ import type { Point2, Point3 } from './types'
 import {
   buildBaseShapePoints,
   sanitizeClosedPath,
-  moveSeamToHingeMidpoint,
   polygonSignedArea,
 } from './baseShape'
-import { buildZProfilePoints } from './zProfile'
 import {
   normalize2,
   outwardNormalFromTangent,
@@ -26,6 +24,22 @@ type Station = {
   nextNormal: Point2
 }
 
+function rotateXZAtHeight(
+  x: number,
+  z: number,
+  y: number,
+  totalTwistDegrees: number,
+  fullHeight: number,
+): Point2 {
+  if (Math.abs(totalTwistDegrees) < 1e-9 || fullHeight < 1e-9) return [x, z]
+
+  const t = Math.max(0, Math.min(1, y / fullHeight))
+  const angle = (totalTwistDegrees * t * Math.PI) / 180
+  const cosA = Math.cos(angle)
+  const sinA = Math.sin(angle)
+  return [x * cosA - z * sinA, x * sinA + z * cosA]
+}
+
 function buildStations(path: Point2[], isCCW: boolean): Station[] {
   const n = path.length
   return path.map((point, index) => {
@@ -40,20 +54,26 @@ function buildStations(path: Point2[], isCCW: boolean): Station[] {
 }
 
 /** 3-D point at (offset, y) for a given station using mitered intersection. */
-function stationPoint(st: Station, offset: number, y: number): Point3 {
+function stationPoint(
+  st: Station,
+  offset: number,
+  y: number,
+  twistDegrees: number,
+  fullHeight: number,
+): Point3 {
   const [x, z] = intersectOffsetLines(
     st.point, st.prevTangent, st.nextTangent, st.prevNormal, st.nextNormal, offset,
   )
-  return [x, y, z]
+  const [tx, tz] = rotateXZAtHeight(x, z, y, twistDegrees, fullHeight)
+  return [tx, y, tz]
 }
 
 /**
  * Inner wall offset at absolute y, matching the continuous Z-profile formula.
- * Straight draft only — custom shapes use `buildZProfilePoints` for the shell.
  */
 function innerOffsetAt(zProfile: WallZProfile, y: number): number {
   const thickness = Math.max(0.6, zProfile.wallThickness)
-  const slope = Math.tan((zProfile.insideDraft * Math.PI) / 180)
+  const slope = zProfile.straightInnerWall ? 0 : Math.tan((zProfile.insideDraft * Math.PI) / 180)
   return thickness + slope * y
 }
 
@@ -73,67 +93,27 @@ function fanFill(positions: number[], loop: Point3[], faceUp: boolean): void {
   }
 }
 
-// ─── Lid shell (walls from cutHeight → boxHeight) ─────────────────────────
-
-function addLidShell(
-  positions: number[],
-  stations: Station[],
-  zProfile: WallZProfile,
-  cutHeight: number,
-  boxHeight: number,
-): void {
-  const lidH = boxHeight - cutHeight
-  if (lidH < 0.1) return
-
-  const { outer, inner } = buildZProfilePoints(zProfile, lidH, cutHeight)
-  const sampleCount = outer.length
-  const stationCount = stations.length
-
-  const outerGrid: Point3[][] = stations.map((st) =>
-    outer.map(([offset, y]) => stationPoint(st, offset, y)),
-  )
-  const innerGrid: Point3[][] = stations.map((st) =>
-    inner.map(([offset, y]) => stationPoint(st, offset, y)),
-  )
-
-  for (let i = 0; i < stationCount; i += 1) {
-    const ni = (i + 1) % stationCount
-
-    for (let j = 0; j < sampleCount - 1; j += 1) {
-      // Outer wall
-      addQuad(positions, outerGrid[i][j], outerGrid[ni][j], outerGrid[ni][j + 1], outerGrid[i][j + 1])
-      // Inner wall (reversed winding → inward-facing normal)
-      addQuad(positions, innerGrid[i][j], innerGrid[i][j + 1], innerGrid[ni][j + 1], innerGrid[ni][j])
-    }
-
-    // Top bridge at boxHeight
-    addQuad(
-      positions,
-      outerGrid[i][sampleCount - 1], outerGrid[ni][sampleCount - 1],
-      innerGrid[ni][sampleCount - 1], innerGrid[i][sampleCount - 1],
-    )
-  }
-}
-
-// ─── Top cap (solid panel closing the inner cavity) ───────────────────────
+// ─── Top cap (solid panel at cut plane with configurable thickness) ───────
 
 function addTopCap(
   positions: number[],
   stations: Station[],
   zProfile: WallZProfile,
-  boxHeight: number,
+  cutHeight: number,
   topThickness: number,
+  twistDegrees: number,
+  fullHeight: number,
 ): void {
-  const capTopY = boxHeight
-  const capBottomY = boxHeight - Math.max(0.1, topThickness)
+  const capBottomY = cutHeight
+  const capTopY = cutHeight + Math.max(0.1, topThickness)
+  const capOffset = outerOffsetAt(zProfile, cutHeight)
 
-  const capTopLoop = stations.map((st) => stationPoint(st, innerOffsetAt(zProfile, capTopY), capTopY))
-  const capBottomLoop = stations.map((st) => stationPoint(st, innerOffsetAt(zProfile, capBottomY), capBottomY))
+  const capTopLoop = stations.map((st) => stationPoint(st, capOffset, capTopY, twistDegrees, fullHeight))
+  const capBottomLoop = stations.map((st) => stationPoint(st, capOffset, capBottomY, twistDegrees, fullHeight))
 
-  fanFill(positions, capTopLoop, true)   // top face — normal points up
-  fanFill(positions, capBottomLoop, false) // bottom face — normal points down
+  fanFill(positions, capTopLoop, true)
+  fanFill(positions, capBottomLoop, false)
 
-  // Side edge: inner circumference of the cap panel
   const n = stations.length
   for (let i = 0; i < n; i += 1) {
     const ni = (i + 1) % n
@@ -152,6 +132,8 @@ function addLipRing(
   positions: number[],
   stations: Station[],
   profile: Array<[outerOffset: number, innerOffset: number, y: number]>,
+  twistDegrees: number,
+  fullHeight: number,
 ): void {
   if (profile.length < 2) return
 
@@ -159,10 +141,10 @@ function addLipRing(
 
   // Build grid: profile.length rows × n stations
   const outerLoops: Point3[][] = profile.map(([outerOff, , y]) =>
-    stations.map((st) => stationPoint(st, outerOff, y)),
+    stations.map((st) => stationPoint(st, outerOff, y, twistDegrees, fullHeight)),
   )
   const innerLoops: Point3[][] = profile.map(([, innerOff, y]) =>
-    stations.map((st) => stationPoint(st, innerOff, y)),
+    stations.map((st) => stationPoint(st, innerOff, y, twistDegrees, fullHeight)),
   )
 
   // Sweep walls between consecutive profile rows
@@ -216,8 +198,12 @@ function addInnerLip(
   zProfile: WallZProfile,
   cutHeight: number,
   lid: LidConfig,
+  twistDegrees: number,
+  fullHeight: number,
 ): void {
-  const baseOffset = innerOffsetAt(zProfile, cutHeight)
+  const wallInnerAtCut = innerOffsetAt(zProfile, cutHeight)
+  const lipTolerance = lid.lipTolerance ?? 0.25
+  const baseOffset = wallInnerAtCut + Math.max(0, lipTolerance)
   const lipInner = baseOffset + lid.lipWidth
   const topY = cutHeight
   const btmY = cutHeight - lid.lipThickness
@@ -225,14 +211,14 @@ function addInnerLip(
   let profile: Array<[number, number, number]>
 
   if (lid.type === 'snap') {
-    const snapOverhang = 0.4
+    const snapOverhang = Math.min(0.35, Math.max(0.1, lipTolerance + 0.1))
     const midY = cutHeight - lid.lipThickness * 0.5
     const snapY = cutHeight - lid.lipThickness * 0.75
     profile = [
       [baseOffset, lipInner, topY],
-      [baseOffset - snapOverhang, lipInner, midY],   // bead peak (protrudes outward)
+      [baseOffset - snapOverhang, lipInner, midY],
       [baseOffset - snapOverhang, lipInner, snapY],
-      [baseOffset, lipInner, btmY],                  // taper back at bottom
+      [baseOffset, lipInner, btmY],
     ]
   } else {
     profile = [
@@ -241,34 +227,7 @@ function addInnerLip(
     ]
   }
 
-  addLipRing(positions, stations, profile)
-}
-
-/**
- * Outer lip — hangs downward from cutHeight, wrapping around the outside
- * of the box.
- *
- *   Inner face: flush with box outer wall (outerOffsetAt(cutH))
- *   Outer face: outerOffsetAt(cutH) − lipWidth  (protrudes outward from box)
- */
-function addOuterLip(
-  positions: number[],
-  stations: Station[],
-  zProfile: WallZProfile,
-  cutHeight: number,
-  lid: LidConfig,
-): void {
-  const baseOffset = outerOffsetAt(zProfile, cutHeight)
-  const lipOuter = baseOffset - lid.lipWidth  // smaller offset = further out
-  const topY = cutHeight
-  const btmY = cutHeight - lid.lipThickness
-
-  const profile: Array<[number, number, number]> = [
-    [lipOuter, baseOffset, topY],
-    [lipOuter, baseOffset, btmY],
-  ]
-
-  addLipRing(positions, stations, profile)
+  addLipRing(positions, stations, profile, twistDegrees, fullHeight)
 }
 
 // ─── Public export ────────────────────────────────────────────────────────
@@ -280,13 +239,15 @@ export function buildLidGeometry(
 ): BufferGeometry | null {
   if (lid.type === 'none') return null
 
+  const lipStyle: 'none' | 'inner' = lid.lipStyle === 'inner' ? 'inner' : 'none'
   const boxHeight = Math.max(20, controls.boxHeight)
+  const twistDegrees = controls.twistDegrees ?? 0
   const cutDistFromTop = Math.min(Math.max(0, lid.cutDistFromTop), boxHeight - 1)
   const cutHeight = boxHeight - cutDistFromTop
 
   const rawPath = buildBaseShapePoints(controls, zProfile.wallThickness)
   const cleanedPath = sanitizeClosedPath(rawPath)
-  const path = moveSeamToHingeMidpoint(cleanedPath)
+  const path = cleanedPath
   if (path.length < 3) return null
 
   const isCCW = polygonSignedArea(path) > 0
@@ -294,18 +255,12 @@ export function buildLidGeometry(
 
   const positions: number[] = []
 
-  // 1. Lid shell (outer/inner walls + bridges from cutHeight to boxHeight)
-  addLidShell(positions, stations, zProfile, cutHeight, boxHeight)
+  // 1. Top cap built at the cut plane with explicit panel thickness.
+  addTopCap(positions, stations, zProfile, cutHeight, lid.topThickness, twistDegrees, boxHeight)
 
-  // 2. Top cap (solid panel at top)
-  addTopCap(positions, stations, zProfile, boxHeight, lid.topThickness)
-
-  // 3. Lip(s)
-  if (lid.lipStyle === 'inner' || lid.lipStyle === 'both') {
-    addInnerLip(positions, stations, zProfile, cutHeight, lid)
-  }
-  if (lid.lipStyle === 'outer' || lid.lipStyle === 'both') {
-    addOuterLip(positions, stations, zProfile, cutHeight, lid)
+  // 2. Optional inner lip only (outer lip disabled by design).
+  if (lipStyle === 'inner') {
+    addInnerLip(positions, stations, zProfile, cutHeight, lid, twistDegrees, boxHeight)
   }
 
   const geo = new BufferGeometry()

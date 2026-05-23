@@ -12,6 +12,7 @@ export interface WallZProfile {
   customShape: CustomZProfileShape
   customAmplitude: number // mm
   customFrequency: number // cycles over full height
+  customPhaseShift: number // degrees
   profileAnchor: WallProfileAnchor
   // For both
   wallThickness: number // mm
@@ -26,13 +27,14 @@ export const DEFAULT_WALL_Z_PROFILE: WallZProfile = {
   customShape: 'sine',
   customAmplitude: 3,
   customFrequency: 1,
+  customPhaseShift: 0,
   profileAnchor: 'outer',
   wallThickness: 2.0,
   bottomThickness: 2.0,
 }
 export type BaseShape =
   | 'square'
-  | 'circleFlat'
+  | 'circle'
   | 'triangle'
   | 'pentagon'
   | 'hexagon'
@@ -40,6 +42,7 @@ export type BaseShape =
 
 export type CornerMode = 'none' | 'fillet' | 'chamfer'
 export type PathWaveShape = 'sine' | 'square' | 'triangle'
+export type PathWaveScope = 'whole' | 'perSide'
 
 export interface SketchControls {
   shape: BaseShape
@@ -47,14 +50,18 @@ export interface SketchControls {
   scaleY: number
   useInnerDimensions: boolean
   boxHeight: number
+  twistDegrees: number // total rotation from bottom to top, in degrees
   boxOpacity: number
   boxColor: string
   cornerMode: CornerMode
   cornerRadius: number  // mm
-  circleCenterOffset: number  // mm — signed distance from arc center to hinge line
   pathWaveShape: PathWaveShape
+  pathWaveScope: PathWaveScope
   pathWaveAmplitude: number  // mm
   pathWaveFrequency: number  // whole cycles around the closed path
+  pathWavePhaseShift: number // degrees
+  pathWaveCornerMatched: boolean // taper wave into corners using corner-angle ramps
+  pathWaveSelectedSides: number[] // side indices to affect when scope is per-side
 }
 
 export const DEFAULT_SKETCH_CONTROLS: SketchControls = {
@@ -63,27 +70,31 @@ export const DEFAULT_SKETCH_CONTROLS: SketchControls = {
   scaleY: 40,
   useInnerDimensions: false,
   boxHeight: 40,
+  twistDegrees: 0,
   boxOpacity: 0.55,
   boxColor: '#5f87b8',
   cornerMode: 'none',
   cornerRadius: 5,
-  circleCenterOffset: 0,
   pathWaveShape: 'sine',
+  pathWaveScope: 'whole',
   pathWaveAmplitude: 0,
   pathWaveFrequency: 4,
+  pathWavePhaseShift: 0,
+  pathWaveCornerMatched: false,
+  pathWaveSelectedSides: [],
 }
 
 export type LidType = 'none' | 'simple' | 'snap'
-export type LipStyle = 'none' | 'inner' | 'outer' | 'both'
+export type LipStyle = 'none' | 'inner'
 
 export interface LidConfig {
   type: LidType
-  topThickness: number      // mm — thickness of the solid top panel
-  cutDistFromTop: number    // mm — how far from box top the cut sits
+  topThickness: number      // mm — thickness of the lid top panel
+  cutDistFromTop: number    // mm — cut position measured from original box top
   lipStyle: LipStyle
-  lipWidth: number          // mm — how far the lip protrudes inward / outward
-  lipThickness: number      // mm — height of the lip
-  // hingeEnabled: boolean  // reserved — only valid when hinge line > 10 mm
+  lipWidth: number          // mm — lip radial width toward center
+  lipThickness: number      // mm — lip depth below the cut plane
+  lipTolerance: number      // mm — clearance from box inner wall
 }
 
 export const DEFAULT_LID_CONFIG: LidConfig = {
@@ -93,4 +104,5 @@ export const DEFAULT_LID_CONFIG: LidConfig = {
   lipStyle: 'inner',
   lipWidth: 1.5,
   lipThickness: 5,
+  lipTolerance: 0.25,
 }

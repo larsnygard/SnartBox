@@ -4,6 +4,7 @@ import type { LidConfig, LidType, LipStyle } from '@/types/sketch'
 interface LidPanelProps {
   lid: LidConfig
   onChange: (patch: Partial<LidConfig>) => void
+  showTitle?: boolean
 }
 
 const LID_TYPE_OPTIONS: Array<{ value: LidType; label: string }> = [
@@ -15,11 +16,11 @@ const LID_TYPE_OPTIONS: Array<{ value: LidType; label: string }> = [
 const LIP_STYLE_OPTIONS: Array<{ value: LipStyle; label: string }> = [
   { value: 'none', label: 'None' },
   { value: 'inner', label: 'Inner' },
-  { value: 'outer', label: 'Outer' },
-  { value: 'both', label: 'Both' },
 ]
 
-export function LidPanel({ lid, onChange }: LidPanelProps) {
+export function LidPanel({ lid, onChange, showTitle = true }: LidPanelProps) {
+  const lipTolerance = lid.lipTolerance ?? 0.25
+
   const sectionTitleStyle: CSSProperties = {
     color: '#dce6f5',
     fontSize: 12,
@@ -71,7 +72,7 @@ export function LidPanel({ lid, onChange }: LidPanelProps) {
 
   return (
     <section style={{ width: '100%' }}>
-      <div style={sectionTitleStyle}>Lid</div>
+      {showTitle && <div style={sectionTitleStyle}>Lid</div>}
 
       {/* Type selector */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
@@ -175,6 +176,21 @@ export function LidPanel({ lid, onChange }: LidPanelProps) {
                     Snap bead sits at mid-height of the lip
                   </div>
                 )}
+              </label>
+
+              <label style={{ display: 'grid', gap: 6 }}>
+                <div style={sliderRowStyle}>
+                  <span style={{ color: '#b8c6d8' }}>Lip Tolerance</span>
+                  <span style={valueBadgeStyle}>{lipTolerance.toFixed(2)} mm</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={lipTolerance}
+                  onChange={(e) => onChange({ lipTolerance: Number(e.target.value) })}
+                />
               </label>
             </div>
           )}
