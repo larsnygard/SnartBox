@@ -11,10 +11,8 @@
 //       1. ShapePanel        (box profile selector)
 //       2. DimensionsPanel   (width, depth, height sliders)
 //       3. WallPanel         (wall thickness, floor thickness, corner radius)
-//       4. LidPanel          (lid type and fit parameters)
-//       5. TexturePanel      (pattern picker, depth/scale sliders, face selector)
-//       6. DividersPanel     (column/row count sliders)
-//       7. GridfinityPanel   (enable toggle, NxM grid, Zu height, hole options)
+//       4. LidPanel          (lid cut profile selector and tuning)
+//       5. WallZProfilePanel (profile type, anchor, and profile-specific controls)
 //
 // The panel should have a dark theme to contrast with the bright viewport.
 // All user interactions call the appropriate Zustand store setters.
@@ -26,6 +24,7 @@ import type {
   CornerMode,
   CustomZProfileShape,
   LidConfig,
+  LidCutType,
   PathWaveScope,
   PathWaveShape,
   SketchControls,
@@ -34,7 +33,6 @@ import type {
   WallZProfileType,
 } from '@/types/sketch'
 import { getBaseShapeSideCount } from '@/geometry/baseShape'
-import { LidPanel } from './LidPanel'
 
 interface ParameterPanelProps {
   controls: SketchControls
@@ -77,9 +75,16 @@ const PROFILE_ANCHOR_OPTIONS: Array<{ value: WallProfileAnchor; label: string }>
   { value: 'inner', label: 'Inner' },
 ]
 
-type AccordionSection = 'baseShape' | 'pathWave' | 'zProfile' | 'lid'
+const LID_CUT_OPTIONS: Array<{ value: LidCutType; label: string }> = [
+  { value: 'straight', label: 'Straight' },
+  { value: 'lip', label: 'Lip' },
+  { value: 'snap', label: 'Snap' },
+  { value: 'round', label: 'Round' },
+]
 
-const COLLAPSIBLE_SECTIONS: AccordionSection[] = ['baseShape', 'pathWave', 'zProfile', 'lid']
+type AccordionSection = 'baseShape' | 'pathWave' | 'lid' | 'zProfile'
+
+const COLLAPSIBLE_SECTIONS: AccordionSection[] = ['baseShape', 'pathWave', 'lid', 'zProfile']
 
 export function ParameterPanel({
   controls,
@@ -92,8 +97,8 @@ export function ParameterPanel({
   const [openSections, setOpenSections] = useState<Record<AccordionSection, boolean>>({
     baseShape: true,
     pathWave: false,
-    zProfile: false,
     lid: false,
+    zProfile: false,
   })
   const pathSideCount = getBaseShapeSideCount(controls.shape)
   const twistDegrees = controls.twistDegrees ?? 0
@@ -141,8 +146,8 @@ export function ParameterPanel({
     setOpenSections({
       baseShape: isOpen,
       pathWave: isOpen,
-      zProfile: isOpen,
       lid: isOpen,
+      zProfile: isOpen,
     })
   }
 
@@ -157,6 +162,20 @@ export function ParameterPanel({
     color: active ? '#edf4ff' : '#b0bfce',
     padding: '8px 14px',
     fontWeight: active ? 700 : 500,
+    cursor: 'pointer',
+    outline: 'none',
+    minWidth: 0,
+  })
+
+  const compactTopButtonStyle = (active: boolean): CSSProperties => ({
+    borderRadius: 7,
+    border: active ? '2px solid #5f83b1' : '1px solid #2b3747',
+    background: active ? '#243447' : '#151d27',
+    color: active ? '#edf4ff' : '#b0bfce',
+    padding: '5px 10px',
+    fontWeight: active ? 700 : 600,
+    fontSize: 12,
+    lineHeight: 1.1,
     cursor: 'pointer',
     outline: 'none',
     minWidth: 0,
@@ -178,17 +197,41 @@ export function ParameterPanel({
         overflowY: 'auto',
       }}
     >
+      <section className="sb-logo sb-logo-panel" aria-label="SnartBox logo">
+        <svg viewBox="0 0 64 64" className="sb-logo-icon" role="img" aria-hidden="true">
+          <defs>
+            <linearGradient id="sbLogoFill" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#6EA8D7" />
+              <stop offset="100%" stopColor="#3F6F97" />
+            </linearGradient>
+          </defs>
+          <path
+            d="M8 22 32 9l24 13-24 13z"
+            fill="url(#sbLogoFill)"
+            stroke="#9BC3E6"
+            strokeWidth="1.5"
+          />
+          <path d="M8 22v20l24 13V35z" fill="#264661" stroke="#9BC3E6" strokeWidth="1.5" />
+          <path d="M56 22v20L32 55V35z" fill="#315C7E" stroke="#9BC3E6" strokeWidth="1.5" />
+          <path d="M20 28h24" stroke="#E6F3FF" strokeWidth="2" strokeLinecap="round" opacity="0.8" />
+        </svg>
+        <div className="sb-logo-wordmark">
+          <span className="sb-logo-snart">Snart</span>
+          <span className="sb-logo-box">Box</span>
+        </div>
+      </section>
+
       <section style={{ width: '100%', marginTop: -4 }}>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             onClick={() => setAllSections(true)}
-            style={profileButtonStyle(COLLAPSIBLE_SECTIONS.every((section) => openSections[section]))}
+            style={compactTopButtonStyle(COLLAPSIBLE_SECTIONS.every((section) => openSections[section]))}
           >
             Expand All
           </button>
           <button
             onClick={() => setAllSections(false)}
-            style={profileButtonStyle(COLLAPSIBLE_SECTIONS.every((section) => !openSections[section]))}
+            style={compactTopButtonStyle(COLLAPSIBLE_SECTIONS.every((section) => !openSections[section]))}
           >
             Close All
           </button>
@@ -504,6 +547,220 @@ export function ParameterPanel({
 
       <section style={{ width: '100%' }}>
         <div
+          style={accordionHeaderStyle(openSections.lid)}
+          onClick={() => toggleSection('lid')}
+        >
+          <span>Lid</span>
+          <span>{openSections.lid ? '−' : '+'}</span>
+        </div>
+        {openSections.lid && (
+          <>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#b8c6d8', marginBottom: 12 }}>
+              <input
+                type="checkbox"
+                checked={lidConfig.enabled}
+                onChange={(e) => onLidConfigChange({ enabled: e.target.checked })}
+              />
+              <span>Enable Lid Cut Profile</span>
+            </label>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+              {LID_CUT_OPTIONS.map((option) => {
+                const isActive = lidConfig.cutType === option.value
+                return (
+                  <button
+                    key={option.value}
+                    onClick={() => onLidConfigChange({ cutType: option.value })}
+                    style={profileButtonStyle(isActive)}
+                  >
+                    {option.label}
+                  </button>
+                )
+              })}
+            </div>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#b8c6d8', marginBottom: 12 }}>
+              <input
+                type="checkbox"
+                checked={lidConfig.showCutProfile}
+                onChange={(e) => onLidConfigChange({ showCutProfile: e.target.checked })}
+              />
+              <span>Show Cut Profile Guide</span>
+            </label>
+
+            <div style={{ display: 'grid', gap: 10 }}>
+              {(() => {
+                const cutAngle = lidConfig.cutAngle ?? 0
+                return (
+                  <label style={{ display: 'grid', gap: 6 }}>
+                    <div style={sliderRowStyle}>
+                      <span style={{ color: '#b8c6d8' }}>Cut Angle</span>
+                      <span style={valueBadgeStyle}>{cutAngle.toFixed(1)}&deg;</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={-45}
+                      max={45}
+                      step={0.1}
+                      value={cutAngle}
+                      onChange={(e) => onLidConfigChange({ cutAngle: Number(e.target.value) })}
+                    />
+                  </label>
+                )
+              })()}
+
+              <label style={{ display: 'grid', gap: 6 }}>
+                <div style={sliderRowStyle}>
+                  <span style={{ color: '#b8c6d8' }}>Offset From Top</span>
+                  <span style={valueBadgeStyle}>{lidConfig.cutOffsetFromTop.toFixed(1)} mm</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={30}
+                  step={0.1}
+                  value={lidConfig.cutOffsetFromTop}
+                  onChange={(e) => onLidConfigChange({ cutOffsetFromTop: Number(e.target.value) })}
+                />
+              </label>
+
+              <label style={{ display: 'grid', gap: 6 }}>
+                <div style={sliderRowStyle}>
+                  <span style={{ color: '#b8c6d8' }}>Tolerance (Thickness)</span>
+                  <span style={valueBadgeStyle}>{lidConfig.cutThickness.toFixed(2)} mm</span>
+                </div>
+                <input
+                  type="range"
+                  min={0.05}
+                  max={2}
+                  step={0.01}
+                  value={lidConfig.cutThickness}
+                  onChange={(e) => onLidConfigChange({ cutThickness: Number(e.target.value) })}
+                />
+              </label>
+
+              {lidConfig.cutType === 'straight' && (
+                <label style={{ display: 'grid', gap: 6 }}>
+                  <div style={sliderRowStyle}>
+                    <span style={{ color: '#b8c6d8' }}>Angle</span>
+                    <span style={valueBadgeStyle}>{lidConfig.straightAngle.toFixed(1)}&deg;</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={-45}
+                    max={45}
+                    step={0.05}
+                    value={lidConfig.straightAngle}
+                    onChange={(e) => onLidConfigChange({ straightAngle: Number(e.target.value) })}
+                  />
+                </label>
+              )}
+
+              {lidConfig.cutType === 'lip' && (
+                <>
+                  {(() => {
+                    const lipChamferSize = lidConfig.lipChamferSize ?? 0.3
+                    return (
+                      <>
+                  <label style={{ display: 'grid', gap: 6 }}>
+                    <div style={sliderRowStyle}>
+                      <span style={{ color: '#b8c6d8' }}>Lip Height</span>
+                      <span style={valueBadgeStyle}>{lidConfig.lipHeight.toFixed(2)} mm</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={8}
+                      step={0.05}
+                      value={lidConfig.lipHeight}
+                      onChange={(e) => onLidConfigChange({ lipHeight: Number(e.target.value) })}
+                    />
+                  </label>
+
+                  <label style={{ display: 'grid', gap: 6 }}>
+                    <div style={sliderRowStyle}>
+                      <span style={{ color: '#b8c6d8' }}>Chamfer Size</span>
+                      <span style={valueBadgeStyle}>{lipChamferSize.toFixed(2)} mm</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.01}
+                      max={2}
+                      step={0.01}
+                      value={lipChamferSize}
+                      onChange={(e) => onLidConfigChange({ lipChamferSize: Number(e.target.value) })}
+                    />
+                  </label>
+                      </>
+                    )
+                  })()}
+                </>
+              )}
+
+              {lidConfig.cutType === 'snap' && (
+                <>
+                  {(() => {
+                    const snapFilletRadius = lidConfig.snapFilletRadius ?? 0.3
+                    return (
+                      <>
+                  <label style={{ display: 'grid', gap: 6 }}>
+                    <div style={sliderRowStyle}>
+                      <span style={{ color: '#b8c6d8' }}>Snap Height</span>
+                      <span style={valueBadgeStyle}>{lidConfig.snapHeight.toFixed(2)} mm</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={6}
+                      step={0.05}
+                      value={lidConfig.snapHeight}
+                      onChange={(e) => onLidConfigChange({ snapHeight: Number(e.target.value) })}
+                    />
+                  </label>
+
+                  <label style={{ display: 'grid', gap: 6 }}>
+                    <div style={sliderRowStyle}>
+                      <span style={{ color: '#b8c6d8' }}>Fillet Radius</span>
+                      <span style={valueBadgeStyle}>{snapFilletRadius.toFixed(2)} mm</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.01}
+                      max={2}
+                      step={0.01}
+                      value={snapFilletRadius}
+                      onChange={(e) => onLidConfigChange({ snapFilletRadius: Number(e.target.value) })}
+                    />
+                  </label>
+                      </>
+                    )
+                  })()}
+                </>
+              )}
+
+              {lidConfig.cutType === 'round' && (
+                <label style={{ display: 'grid', gap: 6 }}>
+                  <div style={sliderRowStyle}>
+                    <span style={{ color: '#b8c6d8' }}>Round Radius</span>
+                    <span style={valueBadgeStyle}>{lidConfig.roundRadius.toFixed(2)} mm</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0.2}
+                    max={8}
+                    step={0.05}
+                    value={lidConfig.roundRadius}
+                    onChange={(e) => onLidConfigChange({ roundRadius: Number(e.target.value) })}
+                  />
+                </label>
+              )}
+            </div>
+          </>
+        )}
+      </section>
+
+      <section style={{ width: '100%' }}>
+        <div
           style={accordionHeaderStyle(openSections.zProfile)}
           onClick={() => toggleSection('zProfile')}
         >
@@ -698,18 +955,6 @@ export function ParameterPanel({
         )}
       </section>
 
-      <section style={{ width: '100%' }}>
-        <div
-          style={accordionHeaderStyle(openSections.lid)}
-          onClick={() => toggleSection('lid')}
-        >
-          <span>Lid</span>
-          <span>{openSections.lid ? '−' : '+'}</span>
-        </div>
-        {openSections.lid && (
-          <LidPanel lid={lidConfig} onChange={onLidConfigChange} showTitle={false} />
-        )}
-      </section>
     </aside>
   )
 }

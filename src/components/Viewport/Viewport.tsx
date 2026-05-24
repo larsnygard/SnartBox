@@ -6,6 +6,7 @@
 //   - WallSweepPreview  — the solid 3D mesh
 //   - BasePathPreview   — 2D base-shape outline
 //   - ZProfileGuide     — wall Z-profile cross-section guide lines
+//   - LidCutProfileGuide — preview of the future swept cut profile
 //
 // All geometry math lives in src/geometry/. Props: controls + zProfile.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -19,7 +20,7 @@ import { exportStepBlob, rebuildOpenCascadeStepCache } from '@/geometry/export/e
 import type { LidConfig, SketchControls, WallZProfile } from '@/types/sketch'
 import { buildBaseShapePoints } from '@/geometry/baseShape'
 import { buildWallSweepGeometry, resolveEffectiveZProfilePoints } from '@/geometry/wallSweep'
-import { buildLidGeometry } from '@/geometry/lid'
+import { buildLidCutProfileBand } from '@/geometry/lidProfile'
 import { SceneSetup } from './SceneSetup'
 
 interface ViewportProps {
@@ -31,6 +32,64 @@ interface ViewportProps {
 
 type RenderStyle = 'shaded' | 'wireframe'
 type ProjectionMode = 'perspective' | 'orthographic'
+
+function findBaseAxisZ(controls: SketchControls, wallThickness: number): number {
+  const basePath = buildBaseShapePoints(controls, wallThickness)
+  let baseAxisZ = 0
+  let bestAbsZ = Number.POSITIVE_INFINITY
+
+  for (let i = 0; i < basePath.length; i += 1) {
+    const a = basePath[i]
+    const b = basePath[(i + 1) % basePath.length]
+    const dx = b[0] - a[0]
+
+    if (Math.abs(dx) < 1e-9) {
+      if (Math.abs(a[0]) < 1e-6) {
+        const candidate = (a[1] + b[1]) * 0.5
+        if (Math.abs(candidate) < bestAbsZ) {
+          bestAbsZ = Math.abs(candidate)
+          baseAxisZ = candidate
+        }
+      }
+      continue
+    }
+
+    const t = -a[0] / dx
+    if (t < -1e-6 || t > 1 + 1e-6) continue
+    const z = a[1] + (b[1] - a[1]) * t
+    if (Math.abs(z) < bestAbsZ) {
+      bestAbsZ = Math.abs(z)
+      baseAxisZ = z
+    }
+  }
+
+  return baseAxisZ
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value))
+}
+
+function interpolateOffsetAtY(profile: Array<[number, number]>, yTarget: number): number {
+  if (profile.length === 0) return 0
+  if (profile.length === 1) return profile[0][0]
+
+  if (yTarget <= profile[0][1]) return profile[0][0]
+  if (yTarget >= profile[profile.length - 1][1]) return profile[profile.length - 1][0]
+
+  for (let i = 0; i < profile.length - 1; i += 1) {
+    const a = profile[i]
+    const b = profile[i + 1]
+    if (yTarget < a[1] || yTarget > b[1]) continue
+
+    const dy = b[1] - a[1]
+    if (Math.abs(dy) < 1e-9) return a[0]
+    const t = (yTarget - a[1]) / dy
+    return a[0] + (b[0] - a[0]) * t
+  }
+
+  return profile[profile.length - 1][0]
+}
 
 function BasePathPreview({ controls, zProfile }: { controls: SketchControls; zProfile: WallZProfile }) {
   const pathPoints = useMemo(() => {
@@ -55,37 +114,7 @@ function ZProfileGuide({ controls, zProfile }: { controls: SketchControls; zProf
   const { outerLine, innerLine, topLine, bottomLine } = useMemo(() => {
     const profileHeight = Math.max(20, controls.boxHeight)
     const { outer, inner } = resolveEffectiveZProfilePoints(controls, zProfile, profileHeight)
-    const basePath = buildBaseShapePoints(controls, zProfile.wallThickness)
-
-    // Anchor the profile guide to where the base path intersects the Y-axis (x=0).
-    // This keeps the guide attached even when path modifiers move the shape.
-    let baseAxisZ = 0
-    let bestAbsZ = Number.POSITIVE_INFINITY
-
-    for (let i = 0; i < basePath.length; i += 1) {
-      const a = basePath[i]
-      const b = basePath[(i + 1) % basePath.length]
-      const dx = b[0] - a[0]
-
-      if (Math.abs(dx) < 1e-9) {
-        if (Math.abs(a[0]) < 1e-6) {
-          const candidate = (a[1] + b[1]) * 0.5
-          if (Math.abs(candidate) < bestAbsZ) {
-            bestAbsZ = Math.abs(candidate)
-            baseAxisZ = candidate
-          }
-        }
-        continue
-      }
-
-      const t = -a[0] / dx
-      if (t < -1e-6 || t > 1 + 1e-6) continue
-      const z = a[1] + (b[1] - a[1]) * t
-      if (Math.abs(z) < bestAbsZ) {
-        bestAbsZ = Math.abs(z)
-        baseAxisZ = z
-      }
-    }
+    const baseAxisZ = findBaseAxisZ(controls, zProfile.wallThickness)
 
     const axisX = 0
 
@@ -113,6 +142,70 @@ function ZProfileGuide({ controls, zProfile }: { controls: SketchControls; zProf
   )
 }
 
+function LidCutProfileGuide({
+  controls,
+  zProfile,
+  lidConfig,
+}: {
+  controls: SketchControls
+  zProfile: WallZProfile
+  lidConfig: LidConfig
+}) {
+  const guide = useMemo(() => {
+    const seamY = clamp(controls.boxHeight - lidConfig.cutOffsetFromTop, 0, controls.boxHeight)
+    const { outer, inner } = resolveEffectiveZProfilePoints(controls, zProfile, controls.boxHeight)
+    const outerAtSeam = interpolateOffsetAtY(outer, seamY)
+    const innerAtSeam = interpolateOffsetAtY(inner, seamY)
+    const localWallCenterOffset = (outerAtSeam + innerAtSeam) * 0.5
+    const localWallThickness = Math.max(0.2, Math.abs(innerAtSeam - outerAtSeam))
+
+    const profile = buildLidCutProfileBand(lidConfig, localWallThickness)
+    if (profile.center.length < 2) {
+      return {
+        center: [] as [number, number, number][],
+        upper: [] as [number, number, number][],
+        lower: [] as [number, number, number][],
+        startCap: [] as [number, number, number][],
+        endCap: [] as [number, number, number][],
+      }
+    }
+
+    const baseAxisZ = findBaseAxisZ(controls, zProfile.wallThickness)
+    const axisX = 0
+    const seamCenterZ = baseAxisZ + localWallCenterOffset
+    const cutAngleRad = ((lidConfig.cutAngle ?? 0) * Math.PI) / 180
+    const cosA = Math.cos(cutAngleRad)
+    const sinA = Math.sin(cutAngleRad)
+
+    const mapPoints = (points: Array<[number, number]>) =>
+      points.map(([z, y]) => {
+        const rz = z * cosA - y * sinA
+        const ry = z * sinA + y * cosA
+        return [axisX, seamY + ry, seamCenterZ + rz] as [number, number, number]
+      })
+
+    return {
+      center: mapPoints(profile.center),
+      upper: mapPoints(profile.upper),
+      lower: mapPoints(profile.lower),
+      startCap: mapPoints(profile.startCap),
+      endCap: mapPoints(profile.endCap),
+    }
+  }, [controls, zProfile, lidConfig])
+
+  if (guide.center.length < 2) return null
+
+  return (
+    <group>
+      <Line points={guide.upper} color="#ff7f66" lineWidth={2.5} depthTest={false} />
+      <Line points={guide.lower} color="#ff7f66" lineWidth={2.5} depthTest={false} />
+      {guide.startCap.length === 2 && <Line points={guide.startCap} color="#ff7f66" lineWidth={2.0} depthTest={false} />}
+      {guide.endCap.length === 2 && <Line points={guide.endCap} color="#ff7f66" lineWidth={2.0} depthTest={false} />}
+      <Line points={guide.center} color="#ffb199" lineWidth={1.5} depthTest={false} />
+    </group>
+  )
+}
+
 function downloadBlob(blob: Blob, fileName: string) {
   const url = window.URL.createObjectURL(blob)
   const anchor = window.document.createElement('a')
@@ -125,17 +218,15 @@ function downloadBlob(blob: Blob, fileName: string) {
 function WallSweepPreview({
   controls,
   zProfile,
-  cutHeight,
   renderStyle,
 }: {
   controls: SketchControls
   zProfile: WallZProfile
-  cutHeight?: number
   renderStyle: RenderStyle
 }) {
   const geometry = useMemo(() => {
-    return buildWallSweepGeometry(controls, zProfile, cutHeight)
-  }, [controls, zProfile, cutHeight])
+    return buildWallSweepGeometry(controls, zProfile)
+  }, [controls, zProfile])
 
   if (!geometry) return null
 
@@ -154,54 +245,15 @@ function WallSweepPreview({
   )
 }
 
-function LidPreview({
-  controls,
-  zProfile,
-  lidConfig,
-  cutHeight,
-  renderStyle,
-}: {
-  controls: SketchControls
-  zProfile: WallZProfile
-  lidConfig: LidConfig
-  cutHeight: number
-  renderStyle: RenderStyle
-}) {
-  const geometry = useMemo(
-    () => buildLidGeometry(controls, zProfile, lidConfig),
-    [controls, zProfile, lidConfig],
-  )
-
-  if (!geometry) return null
-
-  return (
-    <group position={[0, cutHeight, 0]}>
-      <mesh geometry={geometry} position={[0, -cutHeight, 0]}>
-        <meshStandardMaterial
-          color={controls.boxColor}
-          opacity={controls.boxOpacity}
-          transparent={controls.boxOpacity < 0.999}
-          metalness={0.05}
-          roughness={0.7}
-          wireframe={renderStyle === 'wireframe'}
-          side={DoubleSide}
-        />
-      </mesh>
-    </group>
-  )
-}
-
 export function Viewport({ controls, zProfile, lidConfig, onControlsChange }: ViewportProps) {
   const [renderMode, setRenderMode] = useState<'preview' | 'cad'>('preview')
   const [exportFormat, setExportFormat] = useState<'stl' | 'step'>('stl')
   const [exporting, setExporting] = useState(false)
   const [cadControls, setCadControls] = useState(controls)
   const [cadZProfile, setCadZProfile] = useState(zProfile)
-  const [cadLidConfig, setCadLidConfig] = useState(lidConfig)
   const [isCadUpdating, setIsCadUpdating] = useState(false)
   const [cadStatus, setCadStatus] = useState('')
   const [showBox, setShowBox] = useState(true)
-  const [showLid, setShowLid] = useState(true)
   const [renderStyle, setRenderStyle] = useState<RenderStyle>('shaded')
   const [projectionMode, setProjectionMode] = useState<ProjectionMode>('perspective')
   const [showGrid, setShowGrid] = useState(true)
@@ -231,7 +283,6 @@ export function Viewport({ controls, zProfile, lidConfig, onControlsChange }: Vi
     const timer = window.setTimeout(() => {
       setCadControls(controls)
       setCadZProfile(zProfile)
-      setCadLidConfig(lidConfig)
 
       void rebuildOpenCascadeStepCache(controls, zProfile)
         .then((result) => {
@@ -256,21 +307,14 @@ export function Viewport({ controls, zProfile, lidConfig, onControlsChange }: Vi
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [controls, zProfile, lidConfig, renderMode])
+  }, [controls, zProfile, renderMode])
 
   const activeControls = renderMode === 'preview' ? controls : cadControls
   const activeZProfile = renderMode === 'preview' ? zProfile : cadZProfile
-  const activeLidConfig = renderMode === 'preview' ? lidConfig : cadLidConfig
-
-  const activeCutHeight = useMemo(() => {
-    if (activeLidConfig.type === 'none') return undefined
-    const bh = Math.max(20, activeControls.boxHeight)
-    return bh - Math.min(Math.max(0, activeLidConfig.cutDistFromTop), bh - 1)
-  }, [activeLidConfig, activeControls.boxHeight])
 
   const exportGeometry = useMemo(
-    () => buildWallSweepGeometry(activeControls, activeZProfile, activeCutHeight),
-    [activeControls, activeZProfile, activeCutHeight],
+    () => buildWallSweepGeometry(activeControls, activeZProfile),
+    [activeControls, activeZProfile],
   )
 
   const handleExport = async () => {
@@ -320,7 +364,7 @@ export function Viewport({ controls, zProfile, lidConfig, onControlsChange }: Vi
           whiteSpace: 'pre-line',
         }}
       >
-        {`Mode: ${renderMode === 'preview' ? 'Preview' : 'CAD'}\nShape: ${activeControls.shape}\nSize: ${activeControls.scaleX.toFixed(0)} mm x ${activeControls.scaleY.toFixed(0)} mm${activeControls.useInnerDimensions ? ' (inner)' : ' (outer)'}\nBox Height: ${activeControls.boxHeight} mm\nLid: ${activeLidConfig.type}${activeCutHeight !== undefined ? ` (cut at ${activeCutHeight.toFixed(1)} mm)` : ''}\nWall Profile: ${activeZProfile.type}\nWall Thickness: ${activeZProfile.wallThickness.toFixed(2)} mm\nBottom Thickness: ${activeZProfile.bottomThickness.toFixed(2)} mm\nOpacity: ${Math.round(activeControls.boxOpacity * 100)}%\nColor: ${activeControls.boxColor.toUpperCase()}`}
+        {`Mode: ${renderMode === 'preview' ? 'Preview' : 'CAD'}\nShape: ${activeControls.shape}\nSize: ${activeControls.scaleX.toFixed(0)} mm x ${activeControls.scaleY.toFixed(0)} mm${activeControls.useInnerDimensions ? ' (inner)' : ' (outer)'}\nBox Height: ${activeControls.boxHeight} mm\nWall Profile: ${activeZProfile.type}\nLid Cut: ${lidConfig.enabled ? lidConfig.cutType : 'off'}\nWall Thickness: ${activeZProfile.wallThickness.toFixed(2)} mm\nBottom Thickness: ${activeZProfile.bottomThickness.toFixed(2)} mm\nOpacity: ${Math.round(activeControls.boxOpacity * 100)}%\nColor: ${activeControls.boxColor.toUpperCase()}`}
       </div>
 
       <div
@@ -553,22 +597,6 @@ export function Viewport({ controls, zProfile, lidConfig, onControlsChange }: Vi
             >
               Box
             </button>
-            <button
-              onClick={() => setShowLid((v) => !v)}
-              disabled={activeLidConfig.type === 'none'}
-              style={{
-                flex: 1,
-                borderRadius: 6,
-                border: showLid && activeLidConfig.type !== 'none' ? '2px solid #5f83b1' : '1px solid #2b3747',
-                background: showLid && activeLidConfig.type !== 'none' ? '#243447' : '#151d27',
-                color: activeLidConfig.type === 'none' ? '#4a5568' : showLid ? '#edf4ff' : '#b0bfce',
-                padding: '6px 8px',
-                fontSize: 12,
-                cursor: activeLidConfig.type === 'none' ? 'not-allowed' : 'pointer',
-              }}
-            >
-              Lid
-            </button>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
             <button
@@ -602,6 +630,7 @@ export function Viewport({ controls, zProfile, lidConfig, onControlsChange }: Vi
               Wall Profile
             </button>
           </div>
+
         </div>
 
             <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
@@ -660,21 +689,14 @@ export function Viewport({ controls, zProfile, lidConfig, onControlsChange }: Vi
           <WallSweepPreview
             controls={activeControls}
             zProfile={activeZProfile}
-            cutHeight={activeCutHeight}
-            renderStyle={renderStyle}
-          />
-        )}
-        {showLid && activeCutHeight !== undefined && (
-          <LidPreview
-            controls={activeControls}
-            zProfile={activeZProfile}
-            lidConfig={activeLidConfig}
-            cutHeight={activeCutHeight}
             renderStyle={renderStyle}
           />
         )}
         {showBaseShape && <BasePathPreview controls={activeControls} zProfile={activeZProfile} />}
         {showWallProfile && <ZProfileGuide controls={activeControls} zProfile={activeZProfile} />}
+        {lidConfig.enabled && lidConfig.showCutProfile && (
+          <LidCutProfileGuide controls={activeControls} zProfile={activeZProfile} lidConfig={lidConfig} />
+        )}
       </Canvas>
     </div>
   )

@@ -11,6 +11,8 @@ import {
 } from '@/types/sketch'
 import { getBaseShapeSideCount } from '@/geometry/baseShape'
 
+const APP_VERSION = 'v0.0.3'
+
 export default function App() {
   const [controls, setControls] = useState<SketchControls>(DEFAULT_SKETCH_CONTROLS)
   const [zProfile, setZProfile] = useState<WallZProfile>(DEFAULT_WALL_Z_PROFILE)
@@ -71,8 +73,11 @@ export default function App() {
         width: '100vw',
         height: '100vh',
         overflow: 'hidden',
+        position: 'relative',
       }}
     >
+      <div className="sb-version">{APP_VERSION}</div>
+
       <ParameterPanel
         controls={controls}
         zProfile={zProfile}

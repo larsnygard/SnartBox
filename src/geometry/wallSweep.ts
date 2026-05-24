@@ -337,7 +337,6 @@ export function resolveEffectiveZProfilePoints(
 export function buildWallSweepGeometry(
   controls: SketchControls,
   zProfile: WallZProfile,
-  topHeight?: number,
 ): BufferGeometry | null {
   const rawPath = buildBaseShapePoints(controls, zProfile.wallThickness)
   const cleanedPath = sanitizeClosedPath(rawPath)
@@ -346,12 +345,12 @@ export function buildWallSweepGeometry(
 
   const isCCW = polygonSignedArea(path) > 0
 
-  const { outer, inner } = resolveEffectiveZProfilePoints(controls, zProfile, topHeight)
+  const fullHeight = Math.max(1, controls.boxHeight)
+  const { outer, inner } = resolveEffectiveZProfilePoints(controls, zProfile)
   if (outer.length < 2 || inner.length < 2) return null
 
   const stationCount = path.length
   const sampleCount = outer.length
-  const fullHeight = Math.max(1, controls.boxHeight)
   const twistDegrees = controls.twistDegrees ?? 0
 
   const stations = path.map((point, index) => {
@@ -401,7 +400,7 @@ export function buildWallSweepGeometry(
 
   const positions: number[] = []
   const floorThickness = Math.max(0.1, zProfile.bottomThickness)
-  const includeTopBridge = topHeight === undefined
+  const includeTopBridge = true
 
   for (let i = 0; i < stationCount; i += 1) {
     const nextI = (i + 1) % stationCount

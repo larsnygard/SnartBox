@@ -1,6 +1,23 @@
 export type WallZProfileType = 'straight' | 'custom'
 export type CustomZProfileShape = 'sine' | 'square' | 'customDrawn'
 export type WallProfileAnchor = 'outer' | 'middle' | 'inner'
+export type LidCutType = 'straight' | 'lip' | 'snap' | 'round'
+
+export interface LidConfig {
+  enabled: boolean
+  cutType: LidCutType
+  showCutProfile: boolean
+  cutOffsetFromTop: number // mm down from top edge
+  cutAngle: number // degrees, rotates the whole cut profile
+  cutThickness: number // mm profile thickness; used as tolerance
+  straightAngle: number // degrees, for straight style
+  lipHeight: number // mm, for lip style
+  lipChamferSize: number // mm, chamfer size at lip transition corners
+  snapHeight: number // mm, step height for snap style
+  snapFilletRadius: number // mm, fillet radius at snap transition corners
+  snapIndent: number // mm, legacy snap setting (unused)
+  roundRadius: number // mm radius for round style
+}
 
 export interface WallZProfile {
   type: WallZProfileType
@@ -31,6 +48,22 @@ export const DEFAULT_WALL_Z_PROFILE: WallZProfile = {
   profileAnchor: 'outer',
   wallThickness: 2.0,
   bottomThickness: 2.0,
+}
+
+export const DEFAULT_LID_CONFIG: LidConfig = {
+  enabled: true,
+  cutType: 'straight',
+  showCutProfile: true,
+  cutOffsetFromTop: 6,
+  cutAngle: 10,
+  cutThickness: 0.35,
+  straightAngle: 0,
+  lipHeight: 2,
+  lipChamferSize: 0.3,
+  snapHeight: 1.2,
+  snapFilletRadius: 0.3,
+  snapIndent: 0.8,
+  roundRadius: 1.8,
 }
 export type BaseShape =
   | 'square'
@@ -84,25 +117,3 @@ export const DEFAULT_SKETCH_CONTROLS: SketchControls = {
   pathWaveSelectedSides: [],
 }
 
-export type LidType = 'none' | 'simple' | 'snap'
-export type LipStyle = 'none' | 'inner'
-
-export interface LidConfig {
-  type: LidType
-  topThickness: number      // mm — thickness of the lid top panel
-  cutDistFromTop: number    // mm — cut position measured from original box top
-  lipStyle: LipStyle
-  lipWidth: number          // mm — lip radial width toward center
-  lipThickness: number      // mm — lip depth below the cut plane
-  lipTolerance: number      // mm — clearance from box inner wall
-}
-
-export const DEFAULT_LID_CONFIG: LidConfig = {
-  type: 'none',
-  topThickness: 2,
-  cutDistFromTop: 3,
-  lipStyle: 'inner',
-  lipWidth: 1.5,
-  lipThickness: 5,
-  lipTolerance: 0.25,
-}
