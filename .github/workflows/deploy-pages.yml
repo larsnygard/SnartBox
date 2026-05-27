@@ -1,0 +1,119 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deployment at a time; don't cancel in-progress so we
+# don't leave the site in a half-deployed state.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-main:
+    name: Build main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web distribution
+        run: npm run build
+
+      - name: Upload main build artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: dist-main
+          path: dist
+          if-no-files-found: error
+
+  build-release:
+    name: Build latest release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.latest-tag.outputs.tag }}
+    steps:
+      - name: Checkout with full history
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Resolve latest release tag
+        id: latest-tag
+        run: |
+          TAG=$(git describe --tags --abbrev=0)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Switch to release tag
+        run: git checkout "${{ steps.latest-tag.outputs.tag }}"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web distribution
+        run: npm run build
+
+      - name: Upload release build artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: dist-release
+          path: dist
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: [build-main, build-release]
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Download main build
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-main
+          path: pages
+
+      - name: Download release build
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-release
+          path: pages/release/${{ needs.build-release.outputs.tag }}
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
