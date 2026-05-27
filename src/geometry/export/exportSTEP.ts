@@ -331,11 +331,6 @@ export async function exportStepBlob(controls: SketchControls, zProfile: WallZPr
     return cachedStepBlob
   }
 
-  const result = await rebuildStepCache(controls, zProfile)
-  if (cachedStepBlob) return cachedStepBlob
-
-  if (!result.ok) {
-    return buildFallbackStepBlob(controls, zProfile)
-  }
-  return buildFallbackStepBlob(controls, zProfile)
+  await rebuildStepCache(controls, zProfile)
+  return cachedStepBlob ?? buildFallbackStepBlob(controls, zProfile)
 }

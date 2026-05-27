@@ -3,6 +3,14 @@
   "private": true,
   "version": "0.0.3",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/larsnygard/SnartBox.git"
+  },
+  "bugs": {
+    "url": "https://github.com/larsnygard/SnartBox/issues"
+  },
+  "homepage": "https://github.com/larsnygard/SnartBox#readme",
   "type": "module",
   "scripts": {
     "dev": "vite",
