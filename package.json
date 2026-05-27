@@ -13,7 +13,6 @@
     "@react-three/drei": "^9.109.0",
     "@react-three/fiber": "^8.17.0",
     "jszip": "^3.10.1",
-    "opencascade.js": "^2.0.0-beta.7dc5acd9",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "three": "^0.168.0",
@@ -26,7 +25,6 @@
     "@vitejs/plugin-react": "^4.3.1",
     "typescript": "^5.5.3",
     "vite": "^5.4.1",
-    "vite-plugin-wasm": "^3.3.0",
-    "vite-plugin-top-level-await": "^1.4.4"
+    "vite-plugin-wasm": "^3.3.0"
   }
 }
