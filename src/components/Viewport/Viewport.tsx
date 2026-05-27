@@ -22,7 +22,6 @@ import { buildBaseShapePoints } from '@/geometry/baseShape'
 import {
   buildWallSweepGeometry,
   buildWallSweepGuideProfile,
-  resolveEffectiveZProfilePoints,
 } from '@/geometry/wallSweep'
 import { buildLidCutProfileBand } from '@/geometry/lidProfile'
 import { SceneSetup } from './SceneSetup'
@@ -41,12 +40,15 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
-function interpolateOffsetAtY(profile: Array<[number, number]>, yTarget: number): number {
+function interpolateGuideZAtY(
+  profile: Array<[number, number, number]>,
+  yTarget: number,
+): number {
   if (profile.length === 0) return 0
-  if (profile.length === 1) return profile[0][0]
+  if (profile.length === 1) return profile[0][2]
 
-  if (yTarget <= profile[0][1]) return profile[0][0]
-  if (yTarget >= profile[profile.length - 1][1]) return profile[profile.length - 1][0]
+  if (yTarget <= profile[0][1]) return profile[0][2]
+  if (yTarget >= profile[profile.length - 1][1]) return profile[profile.length - 1][2]
 
   for (let i = 0; i < profile.length - 1; i += 1) {
     const a = profile[i]
@@ -54,12 +56,12 @@ function interpolateOffsetAtY(profile: Array<[number, number]>, yTarget: number)
     if (yTarget < a[1] || yTarget > b[1]) continue
 
     const dy = b[1] - a[1]
-    if (Math.abs(dy) < 1e-9) return a[0]
+    if (Math.abs(dy) < 1e-9) return a[2]
     const t = (yTarget - a[1]) / dy
-    return a[0] + (b[0] - a[0]) * t
+    return a[2] + (b[2] - a[2]) * t
   }
 
-  return profile[profile.length - 1][0]
+  return profile[profile.length - 1][2]
 }
 
 function BasePathPreview({ controls, zProfile }: { controls: SketchControls; zProfile: WallZProfile }) {
@@ -130,14 +132,8 @@ function LidCutProfileGuide({
 }) {
   const guide = useMemo(() => {
     const seamY = clamp(controls.boxHeight - lidConfig.cutOffsetFromTop, 0, controls.boxHeight)
-    const { outer, inner } = resolveEffectiveZProfilePoints(controls, zProfile, controls.boxHeight)
-    const outerAtSeam = interpolateOffsetAtY(outer, seamY)
-    const innerAtSeam = interpolateOffsetAtY(inner, seamY)
-    const localWallCenterOffset = (outerAtSeam + innerAtSeam) * 0.5
-    const localWallThickness = Math.max(0.2, Math.abs(innerAtSeam - outerAtSeam))
-
-    const profile = buildLidCutProfileBand(lidConfig, localWallThickness)
-    if (profile.center.length < 2) {
+    const sweepGuide = buildWallSweepGuideProfile(controls, zProfile)
+    if (!sweepGuide || sweepGuide.outer.length < 2 || sweepGuide.inner.length < 2) {
       return {
         center: [] as [number, number, number][],
         upper: [] as [number, number, number][],
@@ -147,9 +143,23 @@ function LidCutProfileGuide({
       }
     }
 
-    const baseAxisZ = findBaseAxisZ(controls, zProfile.wallThickness)
+    const outerAtSeamZ = interpolateGuideZAtY(sweepGuide.outer, seamY)
+    const innerAtSeamZ = interpolateGuideZAtY(sweepGuide.inner, seamY)
+    const seamCenterZ = (outerAtSeamZ + innerAtSeamZ) * 0.5
+    const localWallThickness = Math.max(0.2, Math.abs(innerAtSeamZ - outerAtSeamZ))
+
+    const profile = buildLidCutProfileBand(lidConfig, localWallThickness)
+    if (profile.center.length < 2) {
+      return {
+        center: [] as [number, number, number][],
+        upper: [] as [number, number, number][],
+        lower: [] as [number, number, number][],
+        startCap: [] as [number, number, number][],
+        endCap: [] as [number, number, number][],
+        }
+      }
+
     const axisX = 0
-    const seamCenterZ = baseAxisZ + localWallCenterOffset
     const cutAngleRad = ((lidConfig.cutAngle ?? 0) * Math.PI) / 180
     const cosA = Math.cos(cutAngleRad)
     const sinA = Math.sin(cutAngleRad)
