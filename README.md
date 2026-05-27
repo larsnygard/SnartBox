@@ -3,6 +3,11 @@
 SnartBox is a browser-based parametric box designer built with React, TypeScript, and Three.js.  
 It lets you shape container geometry interactively and export models for CAD and 3D printing workflows.
 
+## Live Previews
+
+- Current preview: https://larsnygard.github.io/SnartBox/
+- Stable `v0.0.3` preview: https://larsnygard.github.io/SnartBox/release/v0.0.3/
+
 ## Features
 
 - Interactive 3D viewport with preview and CAD modes
