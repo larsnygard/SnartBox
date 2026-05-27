@@ -103,6 +103,101 @@ function rotateXZAtHeight(
   return [x * cosA - z * sinA, x * sinA + z * cosA]
 }
 
+type SweepStation = {
+  point: Point2
+  prevTangent: Point2
+  nextTangent: Point2
+  prevNormal: Point2
+  nextNormal: Point2
+}
+
+function buildSweepPath(controls: SketchControls, zProfile: WallZProfile): Point2[] {
+  return sanitizeClosedPath(buildBaseShapePoints(controls, zProfile.wallThickness))
+}
+
+function buildSweepStations(path: Point2[]): SweepStation[] {
+  const isCCW = polygonSignedArea(path) > 0
+  const stationCount = path.length
+  return path.map((point, index) => {
+    const prev = path[(index - 1 + stationCount) % stationCount]
+    const next = path[(index + 1) % stationCount]
+    const prevTangent = normalize2(point[0] - prev[0], point[1] - prev[1])
+    const nextTangent = normalize2(next[0] - point[0], next[1] - point[1])
+    const prevNormal = outwardNormalFromTangent(prevTangent[0], prevTangent[1], isCCW)
+    const nextNormal = outwardNormalFromTangent(nextTangent[0], nextTangent[1], isCCW)
+    return { point, prevTangent, nextTangent, prevNormal, nextNormal }
+  })
+}
+
+function buildStationProfilePoints(
+  station: SweepStation,
+  profile: Point2[],
+  twistDegrees: number,
+  fullHeight: number,
+): Point3[] {
+  return profile.map(([offset, y]) => {
+    const [x, z] = intersectOffsetLines(
+      station.point,
+      station.prevTangent,
+      station.nextTangent,
+      station.prevNormal,
+      station.nextNormal,
+      offset,
+    )
+    const [tx, tz] = rotateXZAtHeight(x, z, y, twistDegrees, fullHeight)
+    return [tx, y, tz] as Point3
+  })
+}
+
+function selectProfileGuideStation(stations: SweepStation[]): SweepStation | null {
+  if (stations.length < 1) return null
+
+  let best = stations[0]
+  let bestAbsX = Math.abs(best.point[0])
+  let bestZ = best.point[1]
+
+  for (let index = 1; index < stations.length; index += 1) {
+    const candidate = stations[index]
+    const candidateAbsX = Math.abs(candidate.point[0])
+    const candidateZ = candidate.point[1]
+    if (
+      candidateAbsX < bestAbsX - 1e-6
+      || (Math.abs(candidateAbsX - bestAbsX) < 1e-6 && candidateZ > bestZ)
+    ) {
+      best = candidate
+      bestAbsX = candidateAbsX
+      bestZ = candidateZ
+    }
+  }
+
+  return best
+}
+
+function buildProfileGuideAxis(points: Point3[], fallbackDirection: Point2): Point2 {
+  if (points.length > 0) {
+    const origin = points[0]
+    for (let index = points.length - 1; index > 0; index -= 1) {
+      const dx = points[index][0] - origin[0]
+      const dz = points[index][2] - origin[2]
+      const length = Math.hypot(dx, dz)
+      if (length > 1e-9) {
+        return [dx / length, dz / length]
+      }
+    }
+  }
+
+  return normalize2(fallbackDirection[0], fallbackDirection[1])
+}
+
+function projectProfileGuide(points: Point3[], origin: Point2, axis: Point2): Point3[] {
+  return points.map(([x, y, z]) => {
+    const dx = x - origin[0]
+    const dz = z - origin[1]
+    const projectedOffset = dx * axis[0] + dz * axis[1]
+    return [0, y, origin[1] + projectedOffset] as Point3
+  })
+}
+
 function buildOffsetLoop(
   stations: Array<{
     point: Point2
@@ -302,8 +397,7 @@ export function resolveEffectiveZProfilePoints(
   zProfile: WallZProfile,
   topHeight?: number,
 ): { outer: Point2[]; inner: Point2[]; profileScale: number } {
-  const rawPath = buildBaseShapePoints(controls, zProfile.wallThickness)
-  const path = sanitizeClosedPath(rawPath)
+  const path = buildSweepPath(controls, zProfile)
   const profileHeight = Math.max(1, topHeight ?? controls.boxHeight)
   const requested = buildZProfilePoints(zProfile, profileHeight)
 
@@ -311,17 +405,7 @@ export function resolveEffectiveZProfilePoints(
     return { outer: requested.outer, inner: requested.inner, profileScale: 1 }
   }
 
-  const isCCW = polygonSignedArea(path) > 0
-  const stationCount = path.length
-  const stations = path.map((point, index) => {
-    const prev = path[(index - 1 + stationCount) % stationCount]
-    const next = path[(index + 1) % stationCount]
-    const prevTangent = normalize2(point[0] - prev[0], point[1] - prev[1])
-    const nextTangent = normalize2(next[0] - point[0], next[1] - point[1])
-    const prevNormal = outwardNormalFromTangent(prevTangent[0], prevTangent[1], isCCW)
-    const nextNormal = outwardNormalFromTangent(nextTangent[0], nextTangent[1], isCCW)
-    return { point, prevTangent, nextTangent, prevNormal, nextNormal }
-  })
+  const stations = buildSweepStations(path)
 
   const requestedOuterOffsets = requested.outer.map(([offset]) => offset)
   const requestedInnerOffsets = requested.inner.map(([offset]) => offset)
@@ -334,34 +418,55 @@ export function resolveEffectiveZProfilePoints(
   }
 }
 
+export function buildWallSweepGuideProfile(
+  controls: SketchControls,
+  zProfile: WallZProfile,
+): { outer: Point3[]; inner: Point3[] } | null {
+  const path = buildSweepPath(controls, zProfile)
+  if (path.length < 3) return null
+
+  const stations = buildSweepStations(path)
+  const station = selectProfileGuideStation(stations)
+  if (!station) return null
+
+  const { outer, inner } = resolveEffectiveZProfilePoints(controls, zProfile)
+  if (outer.length < 2 || inner.length < 2) return null
+
+  const fullHeight = Math.max(1, controls.boxHeight)
+  const twistDegrees = controls.twistDegrees ?? 0
+  const outerSection = buildStationProfilePoints(station, outer, twistDegrees, fullHeight)
+  const innerSection = buildStationProfilePoints(station, inner, twistDegrees, fullHeight)
+  const fallbackAxis: Point2 = [
+    -(station.prevNormal[0] + station.nextNormal[0]) * 0.5,
+    -(station.prevNormal[1] + station.nextNormal[1]) * 0.5,
+  ]
+  const guideAxis = buildProfileGuideAxis(
+    outerSection.length >= 2 ? outerSection : innerSection,
+    fallbackAxis,
+  )
+  const guideOrigin: Point2 = station.point
+
+  return {
+    outer: projectProfileGuide(outerSection, guideOrigin, guideAxis),
+    inner: projectProfileGuide(innerSection, guideOrigin, guideAxis),
+  }
+}
+
 export function buildWallSweepGeometry(
   controls: SketchControls,
   zProfile: WallZProfile,
 ): BufferGeometry | null {
-  const rawPath = buildBaseShapePoints(controls, zProfile.wallThickness)
-  const cleanedPath = sanitizeClosedPath(rawPath)
-  const path = cleanedPath
+  const path = buildSweepPath(controls, zProfile)
   if (path.length < 3) return null
-
-  const isCCW = polygonSignedArea(path) > 0
 
   const fullHeight = Math.max(1, controls.boxHeight)
   const { outer, inner } = resolveEffectiveZProfilePoints(controls, zProfile)
   if (outer.length < 2 || inner.length < 2) return null
 
-  const stationCount = path.length
+  const stations = buildSweepStations(path)
+  const stationCount = stations.length
   const sampleCount = outer.length
   const twistDegrees = controls.twistDegrees ?? 0
-
-  const stations = path.map((point, index) => {
-    const prev = path[(index - 1 + stationCount) % stationCount]
-    const next = path[(index + 1) % stationCount]
-    const prevTangent = normalize2(point[0] - prev[0], point[1] - prev[1])
-    const nextTangent = normalize2(next[0] - point[0], next[1] - point[1])
-    const prevNormal = outwardNormalFromTangent(prevTangent[0], prevTangent[1], isCCW)
-    const nextNormal = outwardNormalFromTangent(nextTangent[0], nextTangent[1], isCCW)
-    return { point, prevTangent, nextTangent, prevNormal, nextNormal }
-  })
 
   const outerSafeOffsets = outer.map(([offset]) => offset)
   const innerSafeOffsets = inner.map(([offset]) => offset)
