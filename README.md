@@ -10,7 +10,7 @@ It lets you shape container geometry interactively and export models for CAD and
 - Wall profile controls (straight/custom, draft angles, thickness, bottom thickness)
 - Path wave and corner modifiers
 - Lid cut profile controls (straight, lip, snap, round)
-- Export to **STL** and **STEP**
+- Export to **STL** and mesh-based **STEP (AP214)**
 
 ## Tech Stack
 

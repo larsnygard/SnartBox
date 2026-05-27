@@ -3,7 +3,6 @@ import { buildWallSweepGeometry } from '@/geometry/wallSweep'
 
 type CadRebuildResult = {
   ok: boolean
-  fromOpenCascade: boolean
   fallbackUsed: boolean
   errorMessage?: string
 }
@@ -172,7 +171,7 @@ function buildAp214StepFromMesh(
     'ISO-10303-21;',
     'HEADER;',
     "FILE_DESCRIPTION(('FreeCAD Model'),'2;1');",
-    `FILE_NAME('Open CASCADE Shape Model','${ts}',(''),(''),'Open CASCADE STEP processor 7.8','SnartBox','Unknown');`,
+    `FILE_NAME('SnartBox Shape Model','${ts}',(''),(''),'SnartBox STEP exporter 1.0','SnartBox','Unknown');`,
     "FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));",
     'ENDSEC;',
     'DATA;',
@@ -281,7 +280,7 @@ function buildMeshTriangleData(controls: SketchControls, zProfile: WallZProfile)
   }
 }
 
-async function buildStepBlobWithOpenCascade(controls: SketchControls, zProfile: WallZProfile): Promise<Blob> {
+async function buildStepBlob(controls: SketchControls, zProfile: WallZProfile): Promise<Blob> {
   const meshData = buildMeshTriangleData(controls, zProfile)
   if (!meshData) {
     throw new Error('Failed to generate wall sweep mesh for STEP export')
@@ -303,17 +302,16 @@ function buildFallbackStepBlob(controls: SketchControls, zProfile: WallZProfile)
   return new Blob([text], { type: 'model/step' })
 }
 
-export async function rebuildOpenCascadeStepCache(
+export async function rebuildStepCache(
   controls: SketchControls,
   zProfile: WallZProfile,
 ): Promise<CadRebuildResult> {
   const key = buildStepCacheKey(controls, zProfile)
   try {
-    cachedStepBlob = await buildStepBlobWithOpenCascade(controls, zProfile)
+    cachedStepBlob = await buildStepBlob(controls, zProfile)
     cachedStepKey = key
     return {
       ok: true,
-      fromOpenCascade: true,
       fallbackUsed: false,
     }
   } catch (error) {
@@ -321,7 +319,6 @@ export async function rebuildOpenCascadeStepCache(
     cachedStepKey = key
     return {
       ok: true,
-      fromOpenCascade: false,
       fallbackUsed: true,
       errorMessage: error instanceof Error ? error.message : String(error),
     }
@@ -334,7 +331,7 @@ export async function exportStepBlob(controls: SketchControls, zProfile: WallZPr
     return cachedStepBlob
   }
 
-  const result = await rebuildOpenCascadeStepCache(controls, zProfile)
+  const result = await rebuildStepCache(controls, zProfile)
   if (cachedStepBlob) return cachedStepBlob
 
   if (!result.ok) {

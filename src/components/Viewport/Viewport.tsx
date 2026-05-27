@@ -16,7 +16,7 @@ import { Line } from '@react-three/drei'
 import { useEffect, useMemo, useState } from 'react'
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js'
 import { Mesh, DoubleSide } from 'three'
-import { exportStepBlob, rebuildOpenCascadeStepCache } from '@/geometry/export/exportSTEP'
+import { exportStepBlob, rebuildStepCache } from '@/geometry/export/exportSTEP'
 import type { LidConfig, SketchControls, WallZProfile } from '@/types/sketch'
 import { buildBaseShapePoints } from '@/geometry/baseShape'
 import { buildWallSweepGeometry, resolveEffectiveZProfilePoints } from '@/geometry/wallSweep'
@@ -278,22 +278,22 @@ export function Viewport({ controls, zProfile, lidConfig, onControlsChange }: Vi
 
     let cancelled = false
     setIsCadUpdating(true)
-    setCadStatus('Queued OpenCascade rebuild...')
+    setCadStatus('Queued STEP cache rebuild...')
 
     const timer = window.setTimeout(() => {
       setCadControls(controls)
       setCadZProfile(zProfile)
 
-      void rebuildOpenCascadeStepCache(controls, zProfile)
+      void rebuildStepCache(controls, zProfile)
         .then((result) => {
           if (cancelled) return
           if (result.errorMessage) {
-            console.warn('OpenCascade rebuild failed, using fallback STEP cache:', result.errorMessage)
+            console.warn('STEP cache rebuild failed, using fallback STEP cache:', result.errorMessage)
           }
           setCadStatus(
-            result.fromOpenCascade
-              ? 'OpenCascade rebuild complete.'
-              : 'OpenCascade unavailable, using fallback STEP cache.',
+            result.fallbackUsed
+              ? 'STEP cache rebuilt with fallback geometry.'
+              : 'STEP cache rebuild complete.',
           )
         })
         .finally(() => {
