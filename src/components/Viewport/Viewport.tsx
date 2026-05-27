@@ -287,9 +287,6 @@ export function Viewport({ controls, zProfile, lidConfig, onControlsChange }: Vi
       void rebuildStepCache(controls, zProfile)
         .then((result) => {
           if (cancelled) return
-          if (result.errorMessage) {
-            console.warn('STEP cache rebuild failed, using fallback STEP cache:', result.errorMessage)
-          }
           setCadStatus(
             result.fallbackUsed
               ? 'STEP cache rebuilt with fallback geometry.'

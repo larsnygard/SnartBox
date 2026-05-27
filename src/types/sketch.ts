@@ -15,7 +15,6 @@ export interface LidConfig {
   lipChamferSize: number // mm, chamfer size at lip transition corners
   snapHeight: number // mm, step height for snap style
   snapFilletRadius: number // mm, fillet radius at snap transition corners
-  snapIndent: number // mm, legacy snap setting (unused)
   roundRadius: number // mm radius for round style
 }
 
@@ -62,7 +61,6 @@ export const DEFAULT_LID_CONFIG: LidConfig = {
   lipChamferSize: 0.3,
   snapHeight: 1.2,
   snapFilletRadius: 0.3,
-  snapIndent: 0.8,
   roundRadius: 1.8,
 }
 export type BaseShape =
@@ -116,4 +114,3 @@ export const DEFAULT_SKETCH_CONTROLS: SketchControls = {
   pathWaveCornerMatched: false,
   pathWaveSelectedSides: [],
 }
-
