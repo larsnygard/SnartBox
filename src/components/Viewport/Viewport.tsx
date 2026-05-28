@@ -22,6 +22,7 @@ import { buildBaseShapePoints } from '@/geometry/baseShape'
 import {
   buildWallSweepGeometry,
   buildWallSweepGuideProfile,
+  buildBoxAndLidGeometries,
 } from '@/geometry/wallSweep'
 import { buildLidCutProfileBand } from '@/geometry/lidProfile'
 import { SceneSetup } from './SceneSetup'
@@ -229,6 +230,48 @@ function WallSweepPreview({
         side={DoubleSide}
       />
     </mesh>
+  )
+}
+
+// Visual gap between lid and box in the 3D preview (mm)
+const LID_PREVIEW_GAP = 2
+
+function LidSweepPreview({
+  controls,
+  zProfile,
+  lidConfig,
+  renderStyle,
+}: {
+  controls: SketchControls
+  zProfile: WallZProfile
+  lidConfig: LidConfig
+  renderStyle: RenderStyle
+}) {
+  const geometries = useMemo(() => {
+    return buildBoxAndLidGeometries(controls, zProfile, lidConfig)
+  }, [controls, zProfile, lidConfig])
+
+  if (!geometries) return null
+
+  const matProps = {
+    color: controls.boxColor,
+    opacity: controls.boxOpacity,
+    transparent: controls.boxOpacity < 0.999,
+    metalness: 0.05,
+    roughness: 0.7,
+    wireframe: renderStyle === 'wireframe',
+    side: DoubleSide,
+  }
+
+  return (
+    <group>
+      <mesh geometry={geometries.box}>
+        <meshStandardMaterial {...matProps} />
+      </mesh>
+      <mesh geometry={geometries.lid} position={[0, LID_PREVIEW_GAP, 0]}>
+        <meshStandardMaterial {...matProps} />
+      </mesh>
+    </group>
   )
 }
 
@@ -669,13 +712,22 @@ export function Viewport({ controls, zProfile, lidConfig, onControlsChange }: Vi
         style={{ background: '#1b232d' }}
       >
         <SceneSetup showGrid={showGrid} showAxes={showAxes} />
-        {showBox && (
-          <WallSweepPreview
-            controls={activeControls}
-            zProfile={activeZProfile}
-            renderStyle={renderStyle}
-          />
-        )}
+        {showBox && lidConfig.enabled
+          ? (
+            <LidSweepPreview
+              controls={activeControls}
+              zProfile={activeZProfile}
+              lidConfig={lidConfig}
+              renderStyle={renderStyle}
+            />
+          )
+          : showBox && (
+            <WallSweepPreview
+              controls={activeControls}
+              zProfile={activeZProfile}
+              renderStyle={renderStyle}
+            />
+          )}
         {showBaseShape && <BasePathPreview controls={activeControls} zProfile={activeZProfile} />}
         {showWallProfile && <ZProfileGuide controls={activeControls} zProfile={activeZProfile} />}
         {lidConfig.enabled && lidConfig.showCutProfile && (

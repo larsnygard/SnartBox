@@ -11,7 +11,7 @@ import {
 } from '@/types/sketch'
 import { getBaseShapeSideCount } from '@/geometry/baseShape'
 
-const APP_VERSION = 'v0.0.3'
+const APP_VERSION = 'v0.1.0'
 
 export default function App() {
   const [controls, setControls] = useState<SketchControls>(DEFAULT_SKETCH_CONTROLS)
